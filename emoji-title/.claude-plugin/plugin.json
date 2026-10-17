@@ -1,0 +1,8 @@
+{
+  "name": "emoji-title",
+  "version": "0.2.0",
+  "description": "Prefixes each session title with one fitting emoji, once per session",
+  "author": {
+    "name": "Yekta Leblebici"
+  }
+}
