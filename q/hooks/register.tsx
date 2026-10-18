@@ -1339,9 +1339,11 @@ export const register: Register = on => {
             { action: 'clear-done', key: 'c', label: 'clear finished' },
           ].map(b =>
             hasList ? (
-              // The list takes the keys; these stay for the mouse, the key in the accent colour.
+              // The list takes the keys; these stay for the mouse. The key takes the colour
+              // Claude Code gives a plain Button's hotkey (`suggestion`), so the row looks
+              // the same whether the list or the buttons hold the keys.
               <Button key={b.action} plain onPress={() => handleAction($, b.action)}>
-                <Text bold color="claude">
+                <Text bold color="suggestion">
                   {b.key}
                 </Text>{' '}
                 {b.label}

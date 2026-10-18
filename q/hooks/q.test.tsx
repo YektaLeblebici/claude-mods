@@ -444,7 +444,7 @@ describe('the mod', () => {
     })
   }
 
-  test('the button row is spaced and undimmed, each key in bold accent colour', async ($, on) => {
+  test('the button row is spaced and undimmed, each key in the hotkey colour', async ($, on) => {
     mock.clock(on)
     mock.store(on)
     await runQ($, 'something')
@@ -455,7 +455,7 @@ describe('the mod', () => {
     expect(buttons.every(b => b.props.dimColor !== true)).toBe(true)
     const keys = (await ui.findAll({ type: 'Text' })).filter(t => t.props.bold === true && /^[a-zA-Z]$/.test(t.text))
     expect(keys.map(k => k.text).slice(0, 3)).toEqual(['e', 'd', 'k'])
-    expect(keys.every(k => k.props.color === 'claude')).toBe(true)
+    expect(keys.every(k => k.props.color === 'suggestion')).toBe(true)
     // The buttons sit directly in one wrapping row spaced by a gap: no Fragment or
     // separator, which the terminal would stack as columns.
     const row = (await ui.findAll({ type: 'Box' })).find(b => b.props.flexWrap === 'wrap')
