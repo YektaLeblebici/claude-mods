@@ -19,7 +19,8 @@ export type ListRow = {
   isDone: boolean
 }
 
-export type ListProps = { rows: ListRow[] }
+/** `empty`: a dim line above the rows, what to say when no task is queued; '' for none. */
+export type ListProps = { rows: ListRow[]; empty: string }
 
 const PLAIN_KEYS: Record<string, string> = {
   k: 'cursor-up',
@@ -64,6 +65,7 @@ const List: ClientModule<ListProps, true> = (props, surface) => {
 
   return (
     <Box flexDirection="column">
+      {props.empty && <Text dimColor>{props.empty}</Text>}
       {props.rows.map(row =>
         row.isHeading ? (
           <Text bold>{row.text}</Text>

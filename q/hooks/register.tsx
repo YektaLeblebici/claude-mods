@@ -24,6 +24,7 @@ import {
   cursorId,
   cursorOf,
   moveCursor,
+  focusTarget,
   keepsFocus,
   moveItem,
   nextQueued,
@@ -32,7 +33,6 @@ import {
   parseControl,
   parseForkMarker,
   rebaseText,
-  refocusTarget,
   removeFork,
   removeItem,
   runNext,
@@ -44,6 +44,8 @@ import {
 type $ = EngineInterface
 
 const PANE = 'q'
+const NOTHING_QUEUED = 'Nothing queued. Type a task above, or /q <task> from the prompt.'
+const NOTHING_QUEUED_FIELD = 'Nothing queued. Type a task, Enter to queue (or /q <task> from the prompt)'
 const data = atom({ plugin: 'q', key: 'data' } as const, EMPTY)
 
 // Variables a nested `claude` would otherwise inherit from this session.
@@ -1166,19 +1168,23 @@ export const register: Register = on => {
 
     const visible = visibleItems(d)
 
-    // Keep the keys where they work: the list while it is drawn, else the add-task field.
+    // The list is drawn only with rows: an empty one holding the keys would act on
+    // what is typed (p pauses, m toggles default mode). With nothing to list, the
+    // add-task field takes its place (stretched when docked) and the buttons carry
+    // their own hotkeys, as on surfaces without a Client.
     const hasList = Client !== undefined && (visible.length > 0 || d.forks.length > 0)
     const inputKey = editing ? `edit:${editing.id}` : `new:${d.seq}`
     isListDrawn = hasList
     if (!e.props.isFocused) ringAt = undefined
-    const wasFocused = isPaneFocused
+    const justFocused = e.props.isFocused && !isPaneFocused
     isPaneFocused = e.props.isFocused
-    if (e.props.isFocused && !isRefocusQueued && (hasList ? refocusTarget(ringAt, inputKey) : !wasFocused)) {
+    const target = () => focusTarget({ ringAt, inputKey, hasList, justFocused })
+    if (e.props.isFocused && !isRefocusQueued && target()) {
       isRefocusQueued = true
       $.clock.after(50, () => {
         isRefocusQueued = false
-        const target = hasList ? refocusTarget(ringAt, inputKey) : ringAt === undefined ? inputKey : undefined
-        if (target) void $.ui.focus({ requestId: PANE, key: target }).catch(() => undefined)
+        const to = target()
+        if (to) void $.ui.focus({ requestId: PANE, key: to }).catch(() => undefined)
       })
     }
     const forkTone: Record<string, ListTone> = { failed: 'red', ready: 'green', merging: 'yellow' }
@@ -1207,8 +1213,17 @@ export const register: Register = on => {
     const clip = (s: string, room: number) => (s.length > room ? `${s.slice(0, Math.max(1, room - 1))}…` : s)
     const mark: Record<string, string> = { running: '▶', queued: '·', proposed: '?', done: '✓' }
 
+    // Docked, the list (or, with nothing to list, the add-task field) stretches over the
+    // pane's spare rows, so a click on blank space lands on it and gives it the keys;
+    // blank space outside any element takes no focus. Inline the frame fits the tree,
+    // so stretching would hold it at its tallest.
+    const isDocked = e.props.placement === 'dock' && e.props.scroll.bodyRows > 0
+    const minHeight = isDocked ? e.props.scroll.bodyRows : undefined
+    // The header and the (wrapping) button row take about four of those rows.
+    const fieldRows = isDocked && !hasList && !editing ? Math.max(1, e.props.scroll.bodyRows - 4) : undefined
+
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" minHeight={minHeight}>
         <Text>
           <Text bold>Queue</Text>
           <Text dimColor> · {waiting} waiting · </Text>
@@ -1231,7 +1246,8 @@ export const register: Register = on => {
           ) : (
             <Input
               key={`new:${d.seq}`}
-              placeholder="add a task, Enter to queue"
+              placeholder={visible.length === 0 ? NOTHING_QUEUED_FIELD : 'add a task, Enter to queue'}
+              rows={fieldRows}
               submitLabel="queue"
               onSubmit={value => {
                 const text = value.trim()
@@ -1239,37 +1255,40 @@ export const register: Register = on => {
               }}
             />
           ))}
-        {visible.length === 0 && <Text dimColor>Nothing queued. Type a task above, or /q &lt;task&gt; from the prompt.</Text>}
+        {!Input && visible.length === 0 && <Text dimColor>{NOTHING_QUEUED}</Text>}
         {Client ? (
-          (visible.length > 0 || d.forks.length > 0) && (
-            <Client
-              key="list"
-              module="./list.tsx"
-              props={{
-                rows: [
-                  ...visible.map(
-                    (i): ListRow => ({
-                      id: i.id,
-                      isHeading: false,
-                      head: `${mark[i.status] ?? ' '} #${i.id.slice(1)}`,
-                      who: i.source === 'claude' ? 'claude' : 'you   ',
-                      isClaude: i.source === 'claude',
-                      text: clip(i.text, width - 22).padEnd(Math.max(0, width - 22)),
-                      note: i.status === 'proposed' ? 'needs approval (y)' : '',
-                      tone: 'yellow',
-                      isCursor: i.id === cursorAt,
-                      isDone: i.status === 'done',
-                    }),
-                  ),
-                  ...(d.forks.length > 0
-                    ? [
-                        { ...forkRow(d.forks[0] as QFork), id: 'heading:forks', isHeading: true, text: 'Forks', isCursor: false },
-                        ...d.forks.map(forkRow),
-                      ]
-                    : []),
-                ],
-              }}
-            />
+          hasList && (
+          <Client
+            key="list"
+            module="./list.tsx"
+            flexGrow={1}
+            width="100%"
+            props={{
+              empty: visible.length === 0 ? NOTHING_QUEUED : '',
+              rows: [
+                ...visible.map(
+                  (i): ListRow => ({
+                    id: i.id,
+                    isHeading: false,
+                    head: `${mark[i.status] ?? ' '} #${i.id.slice(1)}`,
+                    who: i.source === 'claude' ? 'claude' : 'you   ',
+                    isClaude: i.source === 'claude',
+                    text: clip(i.text, width - 22).padEnd(Math.max(0, width - 22)),
+                    note: i.status === 'proposed' ? 'needs approval (y)' : '',
+                    tone: 'yellow',
+                    isCursor: i.id === cursorAt,
+                    isDone: i.status === 'done',
+                  }),
+                ),
+                ...(d.forks.length > 0
+                  ? [
+                      { ...forkRow(d.forks[0] as QFork), id: 'heading:forks', isHeading: true, text: 'Forks', isCursor: false },
+                      ...d.forks.map(forkRow),
+                    ]
+                  : []),
+              ],
+            }}
+          />
           )
         ) : (
           visible.map(i => (
@@ -1308,8 +1327,8 @@ export const register: Register = on => {
             { action: 'delete', key: 'd', label: 'delete' },
             { action: 'cursor-up', key: 'k', label: 'cursor up' },
             { action: 'cursor-down', key: 'j', label: 'cursor down' },
-            { action: 'move-up', key: Client ? 'K' : 'w', label: 'move up' },
-            { action: 'move-down', key: Client ? 'J' : 's', label: 'move down' },
+            { action: 'move-up', key: hasList ? 'K' : 'w', label: 'move up' },
+            { action: 'move-down', key: hasList ? 'J' : 's', label: 'move down' },
             { action: 'run-next', key: 'r', label: 'run next' },
             { action: 'approve', key: 'y', label: 'approve' },
             { action: 'fork-session', key: 'f', label: 'fork session' },
@@ -1319,7 +1338,7 @@ export const register: Register = on => {
             { action: 'send-back', key: 'b', label: 'send back' },
             { action: 'clear-done', key: 'c', label: 'clear finished' },
           ].map(b =>
-            Client ? (
+            hasList ? (
               // The list takes the keys; these stay for the mouse, the key in the accent colour.
               <Button key={b.action} plain onPress={() => handleAction($, b.action)}>
                 <Text bold color="claude">

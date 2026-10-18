@@ -62,7 +62,10 @@ claude --plugin-dir /path/to/q
 ### The pane
 
 `k`/`j` (or ↑/↓) move the highlighted cursor; every other key acts on the row
-under it. Click anywhere in the list to give it the keys.
+under it. Docked beside the transcript, the list fills the pane: click anywhere in
+it, blank space included, to give it the keys. With nothing queued there is no
+list; the add-task field fills the pane instead, and the buttons take their own
+keys (`p`, `m`, `c` and the rest), so Tab from the field reaches them.
 
 | Key | Action |
 | --- | --- |

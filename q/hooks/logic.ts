@@ -85,11 +85,28 @@ export function moveCursor(d: QData, delta: -1 | 1): QData {
 }
 
 /**
- * Where the keys go when the pane takes the keyboard and the click put the ring on
- * nothing: the list when it is drawn as a Client, else the add-task input.
+ * Where the pane's focus should move, or undefined to leave it.
+ *
+ * - `ringAt`: the element holding the ring now (undefined: none).
+ * - `inputKey`: the text field drawn now.
+ * - `hasList`: the task list is drawn (a Client with rows).
+ * - `justFocused`: the pane has just taken the keyboard.
+ *
+ * With the list drawn, the list keeps the keys (refocusTarget). Without it, the
+ * buttons carry their own hotkeys and Tab walks them, so only a click that focused
+ * nothing (the header) or a list that has just gone (its last row deleted) hands
+ * the keys to the text field.
  */
-export function paneFocusTarget(d: QData, hasClient: boolean): string {
-  return hasClient && rowIds(d).length > 0 ? 'list' : `new:${d.seq}`
+export function focusTarget(args: {
+  ringAt: string | undefined
+  inputKey: string
+  hasList: boolean
+  justFocused: boolean
+}): string | undefined {
+  const { ringAt, inputKey, hasList, justFocused } = args
+  if (hasList) return refocusTarget(ringAt, inputKey)
+
+  return (justFocused && ringAt === undefined) || ringAt === 'list' ? inputKey : undefined
 }
 
 /**

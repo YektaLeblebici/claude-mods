@@ -17,7 +17,7 @@ import {
   moveCursor,
   keepsFocus,
   moveItem,
-  paneFocusTarget,
+  focusTarget,
   refocusTarget,
   removeFork,
   parseCommand,
@@ -26,6 +26,9 @@ import {
   runNext,
   slugOf,
 } from './logic'
+
+/** `/q <args>`, as the person would type it. */
+const runQ = ($: Engine, args: string) => $.command.run({ command: 'q', args } as never)
 
 const PANE_PROPS = { title: 'Queue', isFocused: true, bodyColumns: 90, placement: 'inline' } as never
 
@@ -166,7 +169,7 @@ describe('the mod', () => {
   test('/q <task> queues it, and the pane lists it', async ($, on) => {
     mock.clock(on)
     mock.store(on)
-    await $.command.run({ command: 'q', args: 'bump eslint to v10' })
+    await runQ($, 'bump eslint to v10')
 
     expect(await listed($)).toContain('[queued] (you) bump eslint to v10')
 
@@ -194,9 +197,9 @@ describe('the mod', () => {
       return { value: undefined } as never
     })
 
-    await $.command.run({ command: 'q', args: '' })
+    await runQ($, '')
     expect(opened).toEqual(['q'])
-    await $.command.run({ command: 'q', args: '' })
+    await runQ($, '')
     expect(opened).toEqual([])
   })
 
@@ -213,7 +216,7 @@ describe('the mod', () => {
       $.prompt.submit({ text, wait: false, origin: { kind: 'composer' } } as never)
 
     await type('before default')
-    await $.command.run({ command: 'q', args: 'default' })
+    await runQ($, 'default')
     const queued = await type('rename the config loader')
     expect(queued.drop).toMatch(/queued #1/)
     expect(await listed($)).toContain('(you) rename the config loader')
@@ -253,7 +256,7 @@ describe('the mod', () => {
     mock.store(on)
     const { ran, prompts } = commandWorld($, on, [{ name: 'code-review', source: 'builtin' }])
 
-    await $.command.run({ command: 'q', args: '/code-review high' })
+    await runQ($, '/code-review high')
     await clock.advance(10)
 
     expect(ran).toEqual(['code-review high'])
@@ -275,7 +278,7 @@ describe('the mod', () => {
     mock.store(on)
     const { ran } = commandWorld($, on, [{ name: 'compact', source: 'builtin' }])
 
-    await $.command.run({ command: 'q', args: '/compact' })
+    await runQ($, '/compact')
     await clock.advance(10)
 
     expect(ran).toEqual(['compact'])
@@ -287,7 +290,7 @@ describe('the mod', () => {
     mock.store(on)
     commandWorld($, on, [{ name: 'code-review', source: 'builtin' }])
 
-    await $.command.run({ command: 'q', args: '/code-review' })
+    await runQ($, '/code-review')
     await clock.advance(10)
     await clock.advance(59_000)
     expect(await listed($)).toContain('[running] (you) /code-review')
@@ -300,7 +303,7 @@ describe('the mod', () => {
   test('/q refuses commands that would wipe the conversation', async ($, on) => {
     mock.clock(on)
     mock.store(on)
-    await $.command.run({ command: 'q', args: '/clear' })
+    await runQ($, '/clear')
 
     expect(await listed($)).not.toContain('/clear')
   })
@@ -328,7 +331,7 @@ describe('the mod', () => {
     const typeCommand = (name: string, args = '') =>
       $.prompt.submit({ text: `/${name} ${args}`.trim(), command: { name, args }, wait: false, origin: { kind: 'composer' } } as never)
 
-    await $.command.run({ command: 'q', args: 'default' })
+    await runQ($, 'default')
     expect((await typeCommand('code-review', 'high')).drop).toMatch(/queued/)
     expect((await typeCommand('pdf', 'merge a.pdf b.pdf')).drop).toMatch(/queued/)
     expect((await typeCommand('tools:lint')).drop).toMatch(/queued/)
@@ -345,7 +348,7 @@ describe('the mod', () => {
   test('k/j move the cursor and K/J the task under it; keys act on that task', async ($, on) => {
     mock.clock(on)
     mock.store(on)
-    for (const task of ['first', 'second', 'third']) await $.command.run({ command: 'q', args: task })
+    for (const task of ['first', 'second', 'third']) await runQ($, task)
     const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
     const order = async () => [...(await listed($)).matchAll(/\(you\) (\w+)/g)].map(m => m[1])
     const key = async (k: string, shift = false) => {
@@ -396,7 +399,7 @@ describe('the mod', () => {
     // A hook's answer starts no subagent: no agentId comes back.
     on('agent.spawn', () => ({ model: 'claude-opus-5-5' }) as never)
 
-    await $.command.run({ command: 'q', args: 'add a cache' })
+    await runQ($, 'add a cache')
     const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
     await ui.key({ key: 'a', in: 'list' })
     await ui.advance(16)
@@ -444,7 +447,7 @@ describe('the mod', () => {
   test('the button row is spaced and undimmed, each key in bold accent colour', async ($, on) => {
     mock.clock(on)
     mock.store(on)
-    await $.command.run({ command: 'q', args: 'something' })
+    await runQ($, 'something')
     const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
     const buttons = await ui.findAll({ type: 'Button' })
 
@@ -461,13 +464,23 @@ describe('the mod', () => {
     await ui.unmount()
   })
 
-  test('a click that focuses nothing in the pane hands the keys to the list, or the input when empty', () => {
-    const one = addItem(EMPTY, 'something', 'you').data
+  test('focus: the list keeps the keys while drawn; without it, only a click on nothing or a vanished list hands them to the field', () => {
+    const at = (ringAt: string | undefined, hasList: boolean, justFocused = false) =>
+      focusTarget({ ringAt, inputKey: 'new:4', hasList, justFocused })
 
-    expect(paneFocusTarget(one, true)).toBe('list')
-    expect(paneFocusTarget(EMPTY, true)).toBe('new:0')
-    // Surfaces without a Client draw the tasks as buttons: the input takes the keys.
-    expect(paneFocusTarget(one, false)).toBe('new:1')
+    // The list is drawn: the same rule as refocusTarget.
+    expect(at('delete', true)).toBe('list')
+    expect(at('list', true)).toBeUndefined()
+
+    // No list: a click on the header focuses nothing, so the field takes the keys.
+    expect(at(undefined, false, true)).toBe('new:4')
+    // The last row was deleted while the list had the keys: the field takes them.
+    expect(at('list', false)).toBe('new:4')
+    // Tab from the field onto a button stays there: the buttons have their hotkeys.
+    expect(at('pause', false)).toBeUndefined()
+    expect(at('new:4', false)).toBeUndefined()
+    // No new focus and nothing held: nothing to do.
+    expect(at(undefined, false)).toBeUndefined()
   })
 
   test('while the list is drawn it keeps the keys; text fields keep them while typing', () => {
@@ -491,7 +504,7 @@ describe('the mod', () => {
   test('the pane taking the keyboard redraws without trouble', async ($, on) => {
     const clock = mock.clock(on)
     mock.store(on)
-    await $.command.run({ command: 'q', args: 'something' })
+    await runQ($, 'something')
     const props = (isFocused: boolean) => ({ ...(PANE_PROPS as object), isFocused }) as never
     const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: props(false) })
     await ui.redraw(props(true))
@@ -567,6 +580,31 @@ describe('the mod', () => {
     await key('d')
     expect(await listed($)).toContain('fork f4 [merging]')
     expect(ran.slice(before).some(c => c.includes('f4'))).toBe(false)
+    await ui.unmount()
+  })
+
+  test('docked, the list fills the pane; with nothing queued the field does, and the buttons carry the keys', async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    const props = { ...(PANE_PROPS as object), placement: 'dock', scroll: { offset: 0, bodyRows: 30 } } as never
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props })
+
+    // Nothing queued: no empty list to swallow keys; the field stretches instead.
+    expect((await ui.findAll({ type: 'Box' }))[0]?.props.minHeight).toBe(30)
+    expect(await ui.find({ type: 'Client', key: 'list' })).toBeUndefined()
+    const field = await ui.find({ type: 'Input' })
+    expect(field?.props).toMatchObject({ rows: 26, placeholder: expect.stringContaining('Nothing queued') })
+    expect((await ui.find({ type: 'Button', key: 'pause' }))?.props.hotkey).toBe('p')
+
+    // A task queued: the list is drawn and fills the pane; the field is one line again.
+    await ui.input({ key: String(field?.key), text: 'write the changelog' })
+    expect((await ui.find({ type: 'Client', key: 'list' }))?.props).toMatchObject({ flexGrow: 1, width: '100%' })
+    expect((await ui.find({ type: 'Input' }))?.props.rows).toBeUndefined()
+    expect((await ui.find({ type: 'Button', key: 'pause' }))?.props.hotkey).toBeUndefined()
+
+    // Inline the frame fits the tree: no stretching it to its tallest.
+    await ui.redraw({ ...(props as object), placement: 'inline' } as never)
+    expect((await ui.findAll({ type: 'Box' }))[0]?.props.minHeight).toBeUndefined()
     await ui.unmount()
   })
 
