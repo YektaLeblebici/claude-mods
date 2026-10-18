@@ -24,14 +24,15 @@ import {
   cursorId,
   cursorOf,
   moveCursor,
+  keepsFocus,
   moveItem,
   nextQueued,
   nextReadyFork,
-  paneFocusTarget,
   parseCommand,
   parseControl,
   parseForkMarker,
   rebaseText,
+  refocusTarget,
   removeFork,
   removeItem,
   runNext,
@@ -724,11 +725,14 @@ async function handleAction($: $, action: string): Promise<void> {
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
 export const register: Register = on => {
-  // Where the pane's focus ring is, so a click that lands on nothing focusable
-  // (blank space, a heading) can hand the keys to the list. Only the drawing uses
-  // these, and a reload starting them over costs nothing.
+  // Where the pane's focus ring is. While the task list is drawn it keeps the keys:
+  // a click on a button, on blank space or a field redrawn away would otherwise
+  // leave them nowhere. Only the drawing uses these; a reload starting them over
+  // costs nothing.
   let isPaneFocused = false
-  let ringMoves = 0
+  let isListDrawn = false
+  let ringAt: string | undefined
+  let isRefocusQueued = false
 
 
   on('session.start', async ($, e, next) => {
@@ -1124,8 +1128,14 @@ export const register: Register = on => {
 
   // ── The pane ──
   on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    ringMoves += 1
     const element = e.element
+    if (isListDrawn && element !== undefined && !keepsFocus(element)) {
+      // A click on a button: it is still pressed, but the keys stay with the list.
+      ringAt = 'list'
+
+      return next({ ...e, element: 'list' })
+    }
+    ringAt = element
     if (element?.startsWith('item:')) {
       await mutate($, d => ({ ...d, selectedId: element.slice(5) }))
     }
@@ -1147,16 +1157,6 @@ export const register: Register = on => {
     const d = await read($, data)
     const width = Math.max(30, e.props.bodyColumns ?? 80)
 
-    // The pane just took the keyboard: unless the click put the ring on something
-    // (the list, the input, a button), give it to the list, or the input when empty.
-    if (e.props.isFocused && !isPaneFocused) {
-      const movesAtClick = ringMoves
-      const target = paneFocusTarget(d, 'Client' in table)
-      $.clock.after(50, () => {
-        if (ringMoves === movesAtClick) void $.ui.focus({ requestId: PANE, key: target }).catch(() => undefined)
-      })
-    }
-    isPaneFocused = e.props.isFocused
 
     const cursorAt = cursorId(d)
     const editing = d.items.find(i => i.id === d.editingId)
@@ -1165,6 +1165,22 @@ export const register: Register = on => {
     const Client = 'Client' in table ? table.Client : undefined
 
     const visible = visibleItems(d)
+
+    // Keep the keys where they work: the list while it is drawn, else the add-task field.
+    const hasList = Client !== undefined && (visible.length > 0 || d.forks.length > 0)
+    const inputKey = editing ? `edit:${editing.id}` : `new:${d.seq}`
+    isListDrawn = hasList
+    if (!e.props.isFocused) ringAt = undefined
+    const wasFocused = isPaneFocused
+    isPaneFocused = e.props.isFocused
+    if (e.props.isFocused && !isRefocusQueued && (hasList ? refocusTarget(ringAt, inputKey) : !wasFocused)) {
+      isRefocusQueued = true
+      $.clock.after(50, () => {
+        isRefocusQueued = false
+        const target = hasList ? refocusTarget(ringAt, inputKey) : ringAt === undefined ? inputKey : undefined
+        if (target) void $.ui.focus({ requestId: PANE, key: target }).catch(() => undefined)
+      })
+    }
     const forkTone: Record<string, ListTone> = { failed: 'red', ready: 'green', merging: 'yellow' }
     const forkRow = (f: QFork): ListRow => ({
       id: f.id,

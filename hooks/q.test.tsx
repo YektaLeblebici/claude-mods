@@ -15,8 +15,10 @@ import {
   isSameCommand,
   cursorForkOf,
   moveCursor,
+  keepsFocus,
   moveItem,
   paneFocusTarget,
+  refocusTarget,
   removeFork,
   parseCommand,
   parseControl,
@@ -466,6 +468,24 @@ describe('the mod', () => {
     expect(paneFocusTarget(EMPTY, true)).toBe('new:0')
     // Surfaces without a Client draw the tasks as buttons: the input takes the keys.
     expect(paneFocusTarget(one, false)).toBe('new:1')
+  })
+
+  test('while the list is drawn it keeps the keys; text fields keep them while typing', () => {
+    // A click on a button or blank space leaves the ring on the button, or nowhere: back to the list.
+    expect(refocusTarget('delete', 'new:4')).toBe('list')
+    expect(refocusTarget(undefined, 'new:4')).toBe('list')
+    // Already home: leave it.
+    expect(refocusTarget('list', 'new:4')).toBeUndefined()
+    expect(refocusTarget('new:4', 'new:4')).toBeUndefined()
+    // The add-task field was redrawn under a new key after queueing: keep typing in the new one.
+    expect(refocusTarget('new:3', 'new:4')).toBe('new:4')
+    // An edit was saved: back to the list.
+    expect(refocusTarget('edit:i2', 'new:4')).toBe('list')
+
+    expect(keepsFocus('list')).toBe(true)
+    expect(keepsFocus('new:4')).toBe(true)
+    expect(keepsFocus('edit:i2')).toBe(true)
+    expect(keepsFocus('send-back')).toBe(false)
   })
 
   test('the pane taking the keyboard redraws without trouble', async ($, on) => {

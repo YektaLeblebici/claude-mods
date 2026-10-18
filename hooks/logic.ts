@@ -92,6 +92,25 @@ export function paneFocusTarget(d: QData, hasClient: boolean): string {
   return hasClient && rowIds(d).length > 0 ? 'list' : `new:${d.seq}`
 }
 
+/**
+ * Where the pane's focus should go while the task list is drawn, given where it is
+ * (`ringAt`) and the key of the text field drawn now: undefined to leave it. The
+ * list and that field hold the keys; anything else (a button a click focused, a
+ * field since redrawn under a new key, nothing) gives them back to the list, or to
+ * the new add-task field when the old one was being typed in.
+ */
+export function refocusTarget(ringAt: string | undefined, inputKey: string): string | undefined {
+  if (ringAt === 'list' || ringAt === inputKey) return undefined
+  if (ringAt?.startsWith('new:') && inputKey.startsWith('new:')) return inputKey
+
+  return 'list'
+}
+
+/** Whether a focus move onto `element` keeps it: the list and text fields keep the ring. */
+export function keepsFocus(element: string): boolean {
+  return element === 'list' || element.startsWith('new:') || element.startsWith('edit:')
+}
+
 /** The cursor's place once row `id` is gone: the row that took its place, else the one before. */
 function cursorAfterRemoving(d: QData, id: string): string | null {
   if (d.selectedId !== id) return d.selectedId
