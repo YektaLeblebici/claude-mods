@@ -1162,13 +1162,6 @@ export const register: Register = on => {
             ),
           )}
         </Box>
-        {visible.length > 0 && (
-          <Text dimColor>
-            {Client
-              ? 'Keys act on the highlighted task. Click the list if it does not answer.'
-              : 'Keys act on the highlighted task.'}
-          </Text>
-        )}
       </Box>
     )
   })
