@@ -214,25 +214,26 @@ async function pump($: $): Promise<void> {
   )
 }
 
+/** How long a skill's turn may take to start before the queue pauses and says so. */
+const TURN_START_LIMIT_MS = 60_000
+
 /**
- * Runs a queued slash command as if typed. A skill's prompt picks up the queue's
- * instructions (the `skill.prompt` hook); a command that starts no turn
- * (`/compact`, `/model`) is done once it has run.
+ * Runs a queued slash command as if typed. Whether it starts a turn is known up
+ * front (`isQueueable`): a skill or prompt command finishes with its turn, as a
+ * typed task does; a session or mod command (`/compact`, `/rpg`) is done once it
+ * has run. A skill's prompt picking up the queue's instructions (`isWrapped`)
+ * also means a turn is coming, for a bundled skill `QUEUED_BUILTINS` misses.
  */
 async function runCommand($: $, item: QItem, command: { name: string; args: string }, footer: string): Promise<void> {
   await mutate($, x => ({ ...x, pendingCommand: { itemId: item.id, name: command.name, footer, isWrapped: false } }))
 
-  const settle = () =>
-    mutate($, x =>
-      x.runningId === item.id && x.runningTurnId === null
-        ? { ...finishRunning(x), isBusy: false }
-        : x,
-    ).then(() => pump($))
+  const info = (await $.command.list()).find(c => c.name === command.name)
+  const isSkill = info === undefined || isQueueable(info)
+  const isWaiting = (x: QData) => x.runningId === item.id && x.runningTurnId === null
 
-  $.command
-    .run({ command: command.name, args: command.args })
-    .then(() => $.clock.after(3_000, () => void settle()))
-    .catch(err =>
+  const ran = await $.command.run({ command: command.name, args: command.args }).then(
+    () => true,
+    err =>
       mutate($, x => ({
         ...x,
         isBusy: false,
@@ -240,8 +241,35 @@ async function runCommand($: $, item: QItem, command: { name: string; args: stri
         pendingCommand: null,
         items: x.items.map(i => (i.id === item.id ? { ...i, status: 'queued' } : i)),
         paused: { kind: 'user', reason: `q could not run /${command.name}: ${String(err)}` },
-      })),
+      })).then(() => false),
+  )
+  if (!ran) return
+
+  const { pendingCommand } = await read($, data)
+  const expectsTurn = isSkill || (pendingCommand?.itemId === item.id && pendingCommand.isWrapped)
+  if (!expectsTurn) {
+    await mutate($, x => (isWaiting(x) ? { ...finishRunning(x), isBusy: false } : x))
+    later($, () => pump($))
+
+    return
+  }
+
+  // Backstop: a turn that never comes (the skill failed to load) pauses the queue
+  // rather than holding it, or marking a task done that never ran.
+  $.clock.after(TURN_START_LIMIT_MS, () => {
+    void mutate($, x =>
+      isWaiting(x)
+        ? {
+            ...x,
+            isBusy: false,
+            paused: {
+              kind: 'question',
+              reason: `/${command.name} ran but never started a turn. Press p to mark it done and continue.`,
+            },
+          }
+        : x,
     )
+  })
 }
 
 async function add($: $, text: string): Promise<QItem> {

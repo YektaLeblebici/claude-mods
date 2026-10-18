@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import type { On } from 'claude-code'
 
 import { actionOf } from './list'
 
@@ -185,23 +186,32 @@ describe('the mod', () => {
     expect(reached).toEqual(['before default', 'answer to your question'])
   })
 
-  test('a queued skill runs as a command, its prompt carrying the queue instructions', async ($, on) => {
-    const clock = mock.clock(on)
-    mock.store(on)
+  // The engine beneath a queued command: the command list, git (no repository),
+  // and the run itself, which renders a skill's prompt as the engine does.
+  const commandWorld = ($: Engine, on: On, commands: { name: string; source: string }[]) => {
     on('process.run', () => ({ value: { exitCode: 128, stdout: '', stderr: 'not a git repository' } }) as never)
-    on('command.list', () => ({ value: [{ name: 'code-review', description: 'Review', source: 'plugin' }] }) as never)
+    on('command.list', () => ({ value: commands.map(c => ({ ...c, description: '' })) }) as never)
+    on('skill.prompt', (_, e) => ({ text: e.text }))
+    on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+    on('turn.complete', (_, e) => ({ text: e.answer }) as never)
     const ran: string[] = []
     const prompts: string[] = []
-    on('skill.prompt', ($, e) => ({ text: e.text }))
-    const engine = $
     on('command.run', async (_, e) => {
-      ran.push(`${e.command} ${e.args}`)
-      // The engine renders the skill's prompt while the command runs.
-      const rendered = await engine.skill.prompt({ skill: e.command, text: 'Review the diff.' } as never)
-      prompts.push(rendered.text)
+      ran.push(`${e.command} ${e.args}`.trim())
+      if (commands.some(c => c.name === e.command && c.source !== 'builtin' || e.command === 'code-review')) {
+        prompts.push((await $.skill.prompt({ skill: e.command, text: 'Review the diff.' } as never)).text)
+      }
 
       return { text: '' }
     })
+
+    return { ran, prompts }
+  }
+
+  test('a queued skill carries the queue instructions and finishes with its turn, not on a timer', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const { ran, prompts } = commandWorld($, on, [{ name: 'code-review', source: 'builtin' }])
 
     await $.command.run({ command: 'q', args: '/code-review high' })
     await clock.advance(10)
@@ -211,9 +221,40 @@ describe('the mod', () => {
     expect(prompts[0]).toContain('[q: this command is queued task q#i1')
     expect(prompts[0]).toContain('queue_pause')
 
-    // No turn followed (a command that starts none): the item is done once it has run.
-    await clock.advance(3_000)
+    // A slow turn: long past the old 3 seconds, the task is still running.
+    await clock.advance(10_000)
+    expect(await listed($)).toContain('[running] (you) /code-review high')
+
+    await $.turn.start({ text: prompts[0], turnId: 't1' } as never)
+    await $.turn.complete({ answer: 'Reviewed.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
     expect(await listed($)).toContain('[done] (you) /code-review high')
+  })
+
+  test('a queued session command is done as soon as it has run', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const { ran } = commandWorld($, on, [{ name: 'compact', source: 'builtin' }])
+
+    await $.command.run({ command: 'q', args: '/compact' })
+    await clock.advance(10)
+
+    expect(ran).toEqual(['compact'])
+    expect(await listed($)).toContain('[done] (you) /compact')
+  })
+
+  test('a skill whose turn never starts pauses the queue after a minute', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    commandWorld($, on, [{ name: 'code-review', source: 'builtin' }])
+
+    await $.command.run({ command: 'q', args: '/code-review' })
+    await clock.advance(10)
+    await clock.advance(59_000)
+    expect(await listed($)).toContain('[running] (you) /code-review')
+    expect(await listed($)).not.toContain('never started a turn')
+
+    await clock.advance(2_000)
+    expect(await listed($)).toContain('/code-review ran but never started a turn')
   })
 
   test('/q refuses commands that would wipe the conversation', async ($, on) => {
