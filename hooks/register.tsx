@@ -1113,7 +1113,7 @@ export const register: Register = on => {
             {f.note && f.status === 'failed' ? <Text dimColor> {clip(f.note, 60)}</Text> : ''}
           </Text>
         ))}
-        <Box flexDirection="row" flexWrap="wrap">
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
           {[
             { action: 'edit', key: 'e', label: 'edit' },
             { action: 'delete', key: 'd', label: 'delete' },
@@ -1130,8 +1130,13 @@ export const register: Register = on => {
             { action: 'clear-done', key: 'c', label: 'clear done' },
           ].map(b =>
             Client ? (
-              // The list takes the keys; these stay for the mouse, the key named in the label.
-              <Button key={b.action} plain dimColor label={`${b.key} ${b.label}`} onPress={() => handleAction($, b.action)} />
+              // The list takes the keys; these stay for the mouse, the key in the accent colour.
+              <Button key={b.action} plain onPress={() => handleAction($, b.action)}>
+                <Text bold color="claude">
+                  {b.key}
+                </Text>{' '}
+                {b.label}
+              </Button>
             ) : (
               <Button key={b.action} plain hotkey={b.key} label={b.label} onPress={() => handleAction($, b.action)} />
             ),
@@ -1140,8 +1145,8 @@ export const register: Register = on => {
         {visible.length > 0 && (
           <Text dimColor>
             {Client
-              ? 'k/j move the cursor, K/J move the task; keys act on the highlighted task. Click the list if it does not answer.'
-              : 'k/j move the cursor, w/s move the task; keys act on the highlighted task.'}
+              ? 'Keys act on the highlighted task. Click the list if it does not answer.'
+              : 'Keys act on the highlighted task.'}
           </Text>
         )}
       </Box>

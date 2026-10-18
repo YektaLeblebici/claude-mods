@@ -401,6 +401,26 @@ describe('the mod', () => {
     })
   }
 
+  test('the button row is spaced and undimmed, each key in bold accent colour', async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    await $.command.run({ command: 'q', args: 'something' })
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    const buttons = await ui.findAll({ type: 'Button' })
+
+    expect(buttons.map(b => b.text).slice(0, 3)).toEqual(['e edit', 'd delete', 'k cursor up'])
+    expect(buttons.every(b => b.props.dimColor !== true)).toBe(true)
+    const keys = (await ui.findAll({ type: 'Text' })).filter(t => t.props.bold === true && /^[a-zA-Z]$/.test(t.text))
+    expect(keys.map(k => k.text).slice(0, 3)).toEqual(['e', 'd', 'k'])
+    expect(keys.every(k => k.props.color === 'claude')).toBe(true)
+    // The buttons sit directly in one wrapping row spaced by a gap: no Fragment or
+    // separator, which the terminal would stack as columns.
+    const row = (await ui.findAll({ type: 'Box' })).find(b => b.props.flexWrap === 'wrap')
+    expect(row?.props).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2 })
+    expect(row?.children.filter(c => (c as { type?: string }).type !== 'Button')).toEqual([])
+    await ui.unmount()
+  })
+
   test('typing into the pane queues a task, and delete removes the picked one', async ($, on) => {
     mock.clock(on)
     mock.store(on)
