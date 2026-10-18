@@ -2,6 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { QData, QFork, QForkKind, QItem, QPause } from '../types'
+import type { ListRow } from './list'
 import {
   EMPTY,
   QUEUE_SECTION,
@@ -485,6 +486,65 @@ function forkOfAgent(d: QData, agentId: string | undefined): QFork | undefined {
   return agentId === undefined ? undefined : d.forks.find(f => f.agentId === agentId)
 }
 
+// ── Pane actions ────────────────────────────────────────────────────────────
+
+/** What a key or a button in the pane asks for; task actions apply to the task under the cursor. */
+async function handleAction($: $, action: string): Promise<void> {
+  const onCursor = (fn: (x: QData, id: string) => QData) =>
+    mutate($, x => {
+      const at = cursorOf(x)
+
+      return at ? fn({ ...x, selectedId: at.id }, at.id) : x
+    })
+  const forkCursor = async (kind: QForkKind) => {
+    const at = cursorOf(await read($, data))
+    if (at) await startFork($, at.id, kind)
+  }
+
+  switch (action) {
+    case 'cursor-up':
+      await mutate($, x => moveCursor(x, -1))
+      break
+    case 'cursor-down':
+      await mutate($, x => moveCursor(x, 1))
+      break
+    case 'move-up':
+      await onCursor((x, id) => moveItem(x, id, -1))
+      break
+    case 'move-down':
+      await onCursor((x, id) => moveItem(x, id, 1))
+      break
+    case 'edit':
+      await onCursor((x, id) => ({ ...x, editingId: id }))
+      break
+    case 'delete':
+      await onCursor(removeItem)
+      break
+    case 'run-next':
+      await onCursor(runNext)
+      break
+    case 'approve':
+      await onCursor(approveItem)
+      later($, () => pump($))
+      break
+    case 'fork-session':
+      await forkCursor('session')
+      break
+    case 'fork-agent':
+      await forkCursor('agent')
+      break
+    case 'pause':
+      await togglePause($)
+      break
+    case 'default':
+      await toggleDefault($)
+      break
+    case 'clear-done':
+      await mutate($, x => ({ ...x, items: x.items.filter(i => i.status !== 'done') }))
+      break
+  }
+}
+
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
 export const register: Register = on => {
@@ -566,6 +626,7 @@ export const register: Register = on => {
 
       const opened = await $.ui.open({ id: PANE, title: 'Queue', focus: true })
       if (!opened.isPlaced) $.ui.toast(`q: the pane could not open (${opened.reason})`)
+      else await $.ui.focus({ requestId: PANE, key: 'list' }).catch(() => undefined)
 
       return {}
     }
@@ -880,6 +941,13 @@ export const register: Register = on => {
     return next(e)
   })
 
+  on('ui.message', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const action = (e.data as { action?: unknown } | null)?.action
+    if (typeof action === 'string') await handleAction($, action)
+
+    return {}
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const table = $.ui.resolve(e)
     const { Box, Text, Button } = table
@@ -889,17 +957,9 @@ export const register: Register = on => {
 
     const cursor = cursorOf(d)
     const editing = d.items.find(i => i.id === d.editingId)
-    // Actions read the cursor when pressed, not as drawn: two quick presses both land.
-    const act = (fn: (x: QData, id: string) => QData) => () =>
-      mutate($, x => {
-        const at = cursorOf(x)
-
-        return at ? fn({ ...x, selectedId: at.id }, at.id) : x
-      })
-    const withCursor = (fn: (id: string) => Promise<void>) => async () => {
-      const at = cursorOf(await read($, data))
-      if (at) await fn(at.id)
-    }
+    // Where the surface draws a Client, the list hears keys itself (K/J included);
+    // elsewhere the buttons carry the hotkeys, with w/s for moving.
+    const Client = 'Client' in table ? table.Client : undefined
 
     const visible = visibleItems(d)
     const live = d.forks.filter(f => f.status !== 'merged').concat(d.forks.filter(f => f.status === 'merged').slice(-2))
@@ -949,22 +1009,45 @@ export const register: Register = on => {
             />
           ))}
         {visible.length === 0 && <Text dimColor>Nothing queued. Type a task above, or /q &lt;task&gt; from the prompt.</Text>}
-        {visible.map(i => (
-          <Button
-            key={`item:${i.id}`}
-            plain
-            dimColor={i.status === 'done' && i.id !== cursor?.id}
-            onPress={() => mutate($, x => ({ ...x, selectedId: i.id }))}
-          >
-            <Text inverse={i.id === cursor?.id}>
-              {i.id === cursor?.id ? '› ' : '  '}
-              {mark[i.status] ?? ' '} #{i.id.slice(1)}{' '}
-              <Text color={i.source === 'claude' ? 'cyan' : undefined}>{i.source === 'claude' ? 'claude' : 'you   '}</Text>{' '}
-              {clip(i.text, width - 22).padEnd(Math.max(0, width - 22))}
-              {i.status === 'proposed' ? <Text color="yellow"> needs approval (y)</Text> : ''}
-            </Text>
-          </Button>
-        ))}
+        {Client ? (
+          visible.length > 0 && (
+            <Client
+              key="list"
+              module="./list.tsx"
+              props={{
+                rows: visible.map(
+                  (i): ListRow => ({
+                    id: i.id,
+                    head: `${mark[i.status] ?? ' '} #${i.id.slice(1)}`,
+                    who: i.source === 'claude' ? 'claude' : 'you   ',
+                    isClaude: i.source === 'claude',
+                    text: clip(i.text, width - 22).padEnd(Math.max(0, width - 22)),
+                    note: i.status === 'proposed' ? 'needs approval (y)' : '',
+                    isCursor: i.id === cursor?.id,
+                    isDone: i.status === 'done',
+                  }),
+                ),
+              }}
+            />
+          )
+        ) : (
+          visible.map(i => (
+            <Button
+              key={`item:${i.id}`}
+              plain
+              dimColor={i.status === 'done' && i.id !== cursor?.id}
+              onPress={() => mutate($, x => ({ ...x, selectedId: i.id }))}
+            >
+              <Text inverse={i.id === cursor?.id}>
+                {i.id === cursor?.id ? '› ' : '  '}
+                {mark[i.status] ?? ' '} #{i.id.slice(1)}{' '}
+                <Text color={i.source === 'claude' ? 'cyan' : undefined}>{i.source === 'claude' ? 'claude' : 'you   '}</Text>{' '}
+                {clip(i.text, width - 22).padEnd(Math.max(0, width - 22))}
+                {i.status === 'proposed' ? <Text color="yellow"> needs approval (y)</Text> : ''}
+              </Text>
+            </Button>
+          ))
+        )}
         {live.length > 0 && <Text bold>Forks</Text>}
         {live.map(f => (
           <Text key={`fork:${f.id}`} dimColor={f.status === 'merged'}>
@@ -976,38 +1059,36 @@ export const register: Register = on => {
           </Text>
         ))}
         <Box flexDirection="row" flexWrap="wrap">
-          <Button plain hotkey="e" label="edit" onPress={act((x, id) => ({ ...x, editingId: id }))} />
-          <Text> </Text>
-          <Button plain hotkey="d" label="delete" onPress={act(removeItem)} />
-          <Text> </Text>
-          <Button plain hotkey="k" label="cursor up" onPress={() => mutate($, x => moveCursor(x, -1))} />
-          <Text> </Text>
-          <Button plain hotkey="j" label="cursor down" onPress={() => mutate($, x => moveCursor(x, 1))} />
-          <Text> </Text>
-          <Button plain hotkey="w" label="move up" onPress={act((x, id) => moveItem(x, id, -1))} />
-          <Text> </Text>
-          <Button plain hotkey="s" label="move down" onPress={act((x, id) => moveItem(x, id, 1))} />
-          <Text> </Text>
-          <Button plain hotkey="r" label="run next" onPress={act(runNext)} />
-          <Text> </Text>
-          <Button plain hotkey="y" label="approve" onPress={act(approveItem)} />
-          <Text> </Text>
-          <Button plain hotkey="f" label="fork session" onPress={withCursor(id => startFork($, id, 'session'))} />
-          <Text> </Text>
-          <Button plain hotkey="a" label="fork agent" onPress={withCursor(id => startFork($, id, 'agent'))} />
-          <Text> </Text>
-          <Button plain hotkey="p" label={d.paused ? 'resume' : 'pause'} onPress={() => togglePause($)} />
-          <Text> </Text>
-          <Button plain hotkey="m" label={d.isDefault ? 'default off' : 'default on'} onPress={() => toggleDefault($)} />
-          <Text> </Text>
-          <Button
-            plain
-            hotkey="c"
-            label="clear done"
-            onPress={() => mutate($, x => ({ ...x, items: x.items.filter(i => i.status !== 'done') }))}
-          />
+          {[
+            { action: 'edit', key: 'e', label: 'edit' },
+            { action: 'delete', key: 'd', label: 'delete' },
+            { action: 'cursor-up', key: 'k', label: 'cursor up' },
+            { action: 'cursor-down', key: 'j', label: 'cursor down' },
+            { action: 'move-up', key: Client ? 'K' : 'w', label: 'move up' },
+            { action: 'move-down', key: Client ? 'J' : 's', label: 'move down' },
+            { action: 'run-next', key: 'r', label: 'run next' },
+            { action: 'approve', key: 'y', label: 'approve' },
+            { action: 'fork-session', key: 'f', label: 'fork session' },
+            { action: 'fork-agent', key: 'a', label: 'fork agent' },
+            { action: 'pause', key: 'p', label: d.paused ? 'resume' : 'pause' },
+            { action: 'default', key: 'm', label: d.isDefault ? 'default off' : 'default on' },
+            { action: 'clear-done', key: 'c', label: 'clear done' },
+          ].map(b =>
+            Client ? (
+              // The list takes the keys; these stay for the mouse, the key named in the label.
+              <Button key={b.action} plain dimColor label={`${b.key} ${b.label}`} onPress={() => handleAction($, b.action)} />
+            ) : (
+              <Button key={b.action} plain hotkey={b.key} label={b.label} onPress={() => handleAction($, b.action)} />
+            ),
+          )}
         </Box>
-        {visible.length > 0 && <Text dimColor>k/j moves the highlighted cursor; keys act on the highlighted task.</Text>}
+        {visible.length > 0 && (
+          <Text dimColor>
+            {Client
+              ? 'k/j move the cursor, K/J move the task; keys act on the highlighted task. Click the list if it does not answer.'
+              : 'k/j move the cursor, w/s move the task; keys act on the highlighted task.'}
+          </Text>
+        )}
       </Box>
     )
   })

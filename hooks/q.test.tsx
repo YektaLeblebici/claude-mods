@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { actionOf } from './list'
+
 import {
   CLAUDE_CAP,
   EMPTY,
@@ -89,6 +91,19 @@ describe('queue logic', () => {
   })
 })
 
+describe('list keys', () => {
+  test('lowercase k/j move the cursor, uppercase or shifted K/J move the task', () => {
+    expect(actionOf({ key: 'k' })).toBe('cursor-up')
+    expect(actionOf({ key: 'j' })).toBe('cursor-down')
+    expect(actionOf({ key: 'K' })).toBe('move-up')
+    expect(actionOf({ key: 'j', shift: true })).toBe('move-down')
+    expect(actionOf({ key: 'up', shift: true })).toBe('move-up')
+    expect(actionOf({ key: 'd' })).toBe('delete')
+    expect(actionOf({ key: 'D' })).toBeUndefined()
+    expect(actionOf({ key: 'k', ctrl: true })).toBeUndefined()
+  })
+})
+
 describe('commands', () => {
   test('a slash command and its arguments are told apart from a prompt', () => {
     expect(parseCommand('/code-review high')).toEqual({ name: 'code-review', args: 'high' })
@@ -116,7 +131,8 @@ describe('the mod', () => {
 
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ plugin: 'q', surface, component: 'Pane', requestId: 'q', props: PANE_PROPS })
-      expect(await ui.find({ type: 'Button', text: /bump eslint to v10/ })).toBeDefined()
+      // Terminal and desktop draw the list as a Client; other surfaces as buttons.
+      expect(await ui.find({ type: 'Text', text: /bump eslint to v10/, in: 'list' })).toBeDefined()
       await ui.unmount()
     }
   })
@@ -245,26 +261,35 @@ describe('the mod', () => {
     expect(reached).toEqual(['/model opus', '/rpg anim'])
   })
 
-  test('k/j move the cursor, and keys act on the task under it', async ($, on) => {
+  test('k/j move the cursor and K/J the task under it; keys act on that task', async ($, on) => {
     mock.clock(on)
     mock.store(on)
     for (const task of ['first', 'second', 'third']) await $.command.run({ command: 'q', args: task })
     const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
     const order = async () => [...(await listed($)).matchAll(/\(you\) (\w+)/g)].map(m => m[1])
+    const key = async (k: string, shift = false) => {
+      await ui.key({ key: k, ...(shift ? { shift: true } : {}), in: 'list' })
+      await ui.advance(16)
+    }
 
-    // The cursor starts on the first task: j moves it to "second", which d deletes.
-    await ui.press({ key: 'cursor down' })
-    await ui.press({ key: 'delete' })
+    // The cursor starts on "first": j moves it to "second", which d deletes.
+    await key('j')
+    await key('d')
     expect(await order()).toEqual(['first', 'third'])
 
-    // The cursor took "third", the row that replaced "second": w moves it up.
-    await ui.press({ key: 'move up' })
+    // The cursor took "third", the row that replaced "second": K moves it up.
+    await key('K', true)
     expect(await order()).toEqual(['third', 'first'])
+    expect((await ui.find({ type: 'Text', text: /› .*third/, in: 'list' }))?.props.inverse).toBe(true)
 
-    // k at the top stays at the top; the cursor is still on "third".
-    await ui.press({ key: 'cursor up' })
-    await ui.press({ key: 'move down' })
+    // k at the top stays there; J moves "third" back down.
+    await key('k')
+    await key('J', true)
     expect(await order()).toEqual(['first', 'third'])
+
+    // The buttons stay for the mouse and do the same.
+    await ui.press({ key: 'move-up' })
+    expect(await order()).toEqual(['third', 'first'])
     await ui.unmount()
   })
 
@@ -276,8 +301,8 @@ describe('the mod', () => {
     await ui.input({ key: String(field?.key), text: 'write the changelog' })
     expect(await listed($)).toContain('write the changelog')
 
-    await ui.press({ key: 'item:i1' })
-    await ui.press({ key: 'delete' })
+    await ui.key({ key: 'd', in: 'list' })
+    await ui.advance(16)
     expect(await listed($)).not.toContain('write the changelog')
     await ui.unmount()
   })
