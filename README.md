@@ -2,6 +2,12 @@
 
 Personal Claude Code plugins.
 
+## q
+
+A task queue for Claude Code: `/q <task>` queues prompts that run one after another,
+only once the previous task has fully finished, and `/q` opens a pane to reorder,
+edit, approve and fork them into parallel worktrees. See [q/README.md](q/README.md).
+
 ## emoji-title
 
 Prefixes each Claude Code session title with one fitting emoji, once per session:

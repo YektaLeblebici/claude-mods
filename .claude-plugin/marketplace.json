@@ -8,6 +8,11 @@
       "name": "emoji-title",
       "source": "./emoji-title",
       "description": "Prefixes each session title with one fitting emoji, once per session"
+    },
+    {
+      "name": "q",
+      "source": "./q",
+      "description": "A task queue: /q queues prompts that run one after another, each fork-able into its own worktree"
     }
   ],
   "description": "Personal Claude Code plugins"

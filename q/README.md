@@ -36,10 +36,19 @@ follow-up work of its own.
 
 ## Install
 
-`q` is a hooks-module plugin (a "mod"). From a local marketplace folder:
+`q` is a hooks-module plugin (a "mod"), part of the `claude-mods` marketplace. At a
+Claude Code prompt:
+
+```
+/plugin install q --marketplace YektaLeblebici/claude-mods
+```
+
+From a local checkout added as the `local-mods` marketplace
+(`claude plugin marketplace add ~/claude-mods`), the folder itself is what runs, so an
+edit takes effect with `/reload-plugins`:
 
 ```sh
-claude plugin install q@<marketplace>
+claude plugin install q@local-mods
 ```
 
 Or load it for one session while developing:
