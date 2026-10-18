@@ -8,6 +8,36 @@ A task queue for Claude Code: `/q <task>` queues prompts that run one after anot
 only once the previous task has fully finished, and `/q` opens a pane to reorder,
 edit, approve and fork them into parallel worktrees. See [q/README.md](q/README.md).
 
+## clawd-rpg
+
+Claude RPG: a passive RPG that Claude Code plays for you. Clawd explores, fights and levels up as
+you work. Each prompt and each Claude response is a game tick. A successful Bash command makes the
+next tick lucky, a failed one leaves an omen of bad luck, and a `git commit` opens a treasure chest.
+
+- `/rpg` opens the character pane (gear, pets, log, achievements; pick a pet there)
+- `/rpg anim` shows the animated band above the prompt, in pixel art by default
+- `/rpg pixelart` switches the band between pixel art and text art
+- `/rpg reset confirm` starts a new hero after `/rpg reset` (backed up; `/rpg reset undo`)
+- `/clawd hide` hides every view of the game (the line above the prompt, the band, toasts, the pane) while Clawd keeps playing; `/clawd show` brings it back, and so do `/rpg anim` and `/rpg pixelart`
+
+The status line above the prompt shows Clawd's title, level, XP, HP and zone. The save is shared
+by every session on the machine. The mod reads only whether a Bash command succeeded and whether
+it was a `git commit`; command text is never stored.
+
+### Install
+
+At a Claude Code prompt:
+
+```
+/plugin install clawd-rpg --marketplace YektaLeblebici/claude-mods
+```
+
+### Tests
+
+```
+claude plugin test clawd-rpg
+```
+
 ## emoji-title
 
 Prefixes each Claude Code session title with one fitting emoji, once per session:

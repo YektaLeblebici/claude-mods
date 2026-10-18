@@ -13,6 +13,11 @@
       "name": "q",
       "source": "./q",
       "description": "A task queue: /q queues prompts that run one after another, each fork-able into its own worktree"
+    },
+    {
+      "name": "clawd-rpg",
+      "source": "./clawd-rpg",
+      "description": "Claude RPG: a passive pixel-art RPG that Claude Code plays for you while you work"
     }
   ],
   "description": "Personal Claude Code plugins"
