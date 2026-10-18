@@ -334,6 +334,73 @@ describe('the mod', () => {
     await ui.unmount()
   })
 
+  const gitAnswers = (isBranchMerged: boolean) => ($: unknown, e: { argv: readonly string[] }) => {
+    const args = e.argv.join(' ')
+    const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } }) as never
+    if (args.includes('--show-toplevel')) return out('/repo\n')
+    if (args.includes('--abbrev-ref')) return out('main\n')
+    if (args.includes('--git-common-dir')) return out('/repo/.git\n')
+    if (args.includes('merge-base --is-ancestor')) return out('', isBranchMerged ? 0 : 1)
+    if (args.includes('rev-parse --short HEAD')) return out('d14c2d7\n')
+
+    return out('')
+  }
+
+  test('a fork whose subagent never started fails, and its task goes back in the queue', async ($, on) => {
+    mock.clock(on)
+    mock.store(on)
+    on('process.run', gitAnswers(true))
+    on('fs.read', () => ({ value: '' }) as never)
+    on('fs.write', () => ({ value: undefined }) as never)
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    // A hook's answer starts no subagent: no agentId comes back.
+    on('agent.spawn', () => ({ model: 'claude-opus-5-5' }) as never)
+
+    await $.command.run({ command: 'q', args: 'add a cache' })
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    await ui.key({ key: 'a', in: 'list' })
+    await ui.advance(16)
+    await ui.unmount()
+
+    const text = await listed($)
+    expect(text).toContain('fork f2 [failed] (agent) add a cache')
+    expect(text).toContain('#1 [queued] (you) add a cache')
+  })
+
+  for (const isBranchMerged of [true, false]) {
+    test(`a merging fork that ends without reporting: ${isBranchMerged ? 'merged per git' : 'failed, queue paused'}`, async ($, on) => {
+      const clock = mock.clock(on)
+      const fork = {
+        id: 'f2', itemId: 'i1', text: 'add a cache', kind: 'agent', status: 'merging', token: 't',
+        branch: 'q/add-a-cache-f2', worktree: '/repo/.claude/worktrees/q-add-a-cache-f2', agentId: 'fork-agent',
+      }
+      const saved = {
+        ...EMPTY, seq: 2, mergeHolder: 'f2', forks: [fork],
+        items: [{ id: 'i1', text: 'add a cache', source: 'you', status: 'forked', rootId: 'i1' }],
+      }
+      mock.store(on, { 'session:main-session': saved })
+      const appended = mock.session(on)
+      on('process.run', gitAnswers(isBranchMerged))
+      on('session.id', () => ({ value: 'main-session' }) as never)
+      on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+      on('turn.complete', ($, e) => ({ text: e.answer }) as never)
+
+      await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+      await $.turn.complete({ agentId: 'fork-agent', turnId: 't2', reason: 'answer', answer: '', durationMs: 1, isAborted: false } as never)
+      await clock.advance(10)
+
+      const text = await listed($)
+      if (isBranchMerged) {
+        expect(text).toContain('fork f2 [merged]')
+        expect(text).toStartWith('Queue idle.')
+        expect(JSON.stringify(appended.appended())).toContain('merged q/add-a-cache-f2 into main (d14c2d7)')
+      } else {
+        expect(text).toContain('fork f2 [failed]')
+        expect(text).toContain('is not in the main checkout')
+      }
+    })
+  }
+
   test('typing into the pane queues a task, and delete removes the picked one', async ($, on) => {
     mock.clock(on)
     mock.store(on)

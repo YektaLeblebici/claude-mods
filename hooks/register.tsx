@@ -398,13 +398,19 @@ async function startFork($: $, itemId: string, kind: QForkKind): Promise<void> {
     if (added.exitCode !== 0) return failFork($, made, added.stderr.trim() || 'git worktree add failed', true)
 
     const withPlace = { ...made, branch, worktree }
-    const spawned = await $.agent.spawn({
-      subagentType: 'fork',
-      description: `q: ${made.text.slice(0, 40)}`,
-      cwd: worktree,
-      prompt: forkPrompt({ fork: withPlace, parentSessionId, mainCheckout: root, mainBranch, worktree, others }),
-    })
+    let spawned: Awaited<ReturnType<typeof $.agent.spawn>>
+    try {
+      spawned = await $.agent.spawn({
+        subagentType: 'fork',
+        description: `q: ${made.text.slice(0, 40)}`,
+        cwd: worktree,
+        prompt: forkPrompt({ fork: withPlace, parentSessionId, mainCheckout: root, mainBranch, worktree, others }),
+      })
+    } catch (err) {
+      return failFork($, withPlace, `the subagent did not start: ${String(err)}`, true)
+    }
     if (spawned.deny !== undefined) return failFork($, withPlace, spawned.deny, true)
+    if (!spawned.agentId) return failFork($, withPlace, 'the subagent did not start', true)
 
     await mutate($, d => setFork(d, made.id, { branch, worktree, agentId: spawned.agentId, status: 'working' }))
   } else {
@@ -467,6 +473,19 @@ async function grantMerge($: $, forkId: string): Promise<void> {
     return
   }
   $.ui.toast(`q: merging "${granted.text.slice(0, 40)}"; the queue waits for it`)
+}
+
+/** The main checkout's commit when the fork's branch is merged into it, else null. */
+async function mergedSha($: $, fork: QFork): Promise<string | null> {
+  const root = await repoRoot($)
+  if (!root || !fork.branch) return null
+
+  const isIn = await git($, ['merge-base', '--is-ancestor', fork.branch, 'HEAD'], root)
+  if (isIn.exitCode !== 0) return null
+
+  const head = await git($, ['rev-parse', '--short', 'HEAD'], root)
+
+  return head.exitCode === 0 ? head.stdout.trim() : null
 }
 
 async function finishMerge($: $, forkId: string, ok: boolean, detail: string): Promise<void> {
@@ -806,7 +825,15 @@ export const register: Register = on => {
             : setFork(x, fork.id, { status: 'failed', note: `ended with ${e.reason}` }),
         )
       } else if (fork?.status === 'merging') {
-        await finishMerge($, fork.id, false, `the fork stopped (${e.reason}) without reporting the merge`)
+        // The fork's own report can go missing (a call into a copy of the mod a
+        // reload replaced): git says whether the merge happened.
+        const merged = await mergedSha($, fork)
+        await finishMerge(
+          $,
+          fork.id,
+          merged !== null,
+          merged ?? `the fork stopped (${e.reason}) without reporting the merge, and ${fork.branch ?? 'its branch'} is not in the main checkout`,
+        )
       }
     }
 
