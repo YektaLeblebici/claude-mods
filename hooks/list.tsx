@@ -3,13 +3,18 @@ import type { ClientKeyEvent, ClientModule } from 'claude-code'
 // The queue pane's task list, drawn by the surface itself so it hears every key
 // with its modifiers: Button hotkeys cannot tell `K` from `k`.
 
+export type ListTone = '' | 'yellow' | 'red' | 'green'
+
 export type ListRow = {
   id: string
+  /** A section heading ("Forks"): drawn bold, never under the cursor. */
+  isHeading: boolean
   head: string
   who: string
   isClaude: boolean
   text: string
   note: string
+  tone: ListTone
   isCursor: boolean
   isDone: boolean
 }
@@ -29,6 +34,7 @@ const PLAIN_KEYS: Record<string, string> = {
   a: 'fork-agent',
   p: 'pause',
   m: 'default',
+  b: 'send-back',
   c: 'clear-done',
 }
 
@@ -58,13 +64,17 @@ const List: ClientModule<ListProps, true> = (props, surface) => {
 
   return (
     <Box flexDirection="column">
-      {props.rows.map(row => (
-        <Text inverse={row.isCursor} dimColor={row.isDone && !row.isCursor}>
-          {row.isCursor ? '› ' : '  '}
-          {row.head} <Text color={row.isClaude ? 'cyan' : undefined}>{row.who}</Text> {row.text}
-          {row.note ? <Text color="yellow"> {row.note}</Text> : ''}
-        </Text>
-      ))}
+      {props.rows.map(row =>
+        row.isHeading ? (
+          <Text bold>{row.text}</Text>
+        ) : (
+          <Text inverse={row.isCursor} dimColor={row.isDone && !row.isCursor}>
+            {row.isCursor ? '› ' : '  '}
+            {row.head} <Text color={row.isClaude ? 'cyan' : undefined}>{row.who}</Text> {row.text}
+            {row.note ? <Text color={row.tone || undefined}> {row.note}</Text> : ''}
+          </Text>
+        ),
+      )}
     </Box>
   )
 }

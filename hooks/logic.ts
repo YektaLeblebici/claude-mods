@@ -49,27 +49,57 @@ export function visibleItems(d: QData): QItem[] {
   ]
 }
 
-/** The row under the cursor: the picked one while listed, else the first not yet done. */
-export function cursorOf(d: QData): QItem | undefined {
-  const visible = visibleItems(d)
+/** Every row the cursor can stand on, in the order drawn: the tasks, then the forks. */
+export function rowIds(d: QData): string[] {
+  return [...visibleItems(d).map(i => i.id), ...d.forks.map(f => f.id)]
+}
 
-  return visible.find(i => i.id === d.selectedId) ?? visible.find(i => i.status !== 'done') ?? visible[0]
+/** The row under the cursor: the picked one while listed, else the first task not yet done. */
+export function cursorId(d: QData): string | undefined {
+  const rows = rowIds(d)
+  if (d.selectedId && rows.includes(d.selectedId)) return d.selectedId
+
+  return visibleItems(d).find(i => i.status !== 'done')?.id ?? rows[0]
+}
+
+/** The task under the cursor; undefined while it stands on a fork. */
+export function cursorOf(d: QData): QItem | undefined {
+  const id = cursorId(d)
+
+  return visibleItems(d).find(i => i.id === id)
+}
+
+/** The fork under the cursor; undefined while it stands on a task. */
+export function cursorForkOf(d: QData): QFork | undefined {
+  const id = cursorId(d)
+
+  return d.forks.find(f => f.id === id)
 }
 
 export function moveCursor(d: QData, delta: -1 | 1): QData {
-  const visible = visibleItems(d)
-  const at = visible.findIndex(i => i.id === cursorOf(d)?.id)
-  const to = visible[Math.min(visible.length - 1, Math.max(0, at + delta))]
+  const rows = rowIds(d)
+  const at = rows.indexOf(cursorId(d) ?? '')
+  const to = rows[Math.min(rows.length - 1, Math.max(0, at + delta))]
 
-  return to ? { ...d, selectedId: to.id } : d
+  return to ? { ...d, selectedId: to } : d
 }
 
 /**
  * Where the keys go when the pane takes the keyboard and the click put the ring on
- * nothing: the task list when it is drawn as a Client, else the add-task input.
+ * nothing: the list when it is drawn as a Client, else the add-task input.
  */
 export function paneFocusTarget(d: QData, hasClient: boolean): string {
-  return hasClient && visibleItems(d).length > 0 ? 'list' : `new:${d.seq}`
+  return hasClient && rowIds(d).length > 0 ? 'list' : `new:${d.seq}`
+}
+
+/** The cursor's place once row `id` is gone: the row that took its place, else the one before. */
+function cursorAfterRemoving(d: QData, id: string): string | null {
+  if (d.selectedId !== id) return d.selectedId
+
+  const rows = rowIds(d)
+  const at = rows.indexOf(id)
+
+  return rows[at + 1] ?? rows[at - 1] ?? null
 }
 
 /** Removes a waiting item; the cursor goes to the row that took its place. */
@@ -77,12 +107,32 @@ export function removeItem(d: QData, id: string): QData {
   const item = d.items.find(i => i.id === id)
   if (!item || item.status === 'running') return d
 
-  const visible = visibleItems(d)
-  const at = visible.findIndex(i => i.id === id)
-  const neighbour = visible[at + 1] ?? visible[at - 1]
-  const items = d.items.filter(i => i.id !== id)
+  return { ...d, items: d.items.filter(i => i.id !== id), selectedId: cursorAfterRemoving(d, id) }
+}
 
-  return { ...d, items, selectedId: d.selectedId === id ? (neighbour?.id ?? null) : d.selectedId }
+/**
+ * Takes a fork off the list once it is stopped and cleaned up. `drop` abandons its
+ * task; `send-back` returns the task to the front of the queue (re-added if gone).
+ */
+export function removeFork(d: QData, forkId: string, outcome: 'drop' | 'send-back'): QData {
+  const fork = d.forks.find(f => f.id === forkId)
+  if (!fork) return d
+
+  const base: QData = {
+    ...d,
+    forks: d.forks.filter(f => f.id !== forkId),
+    mergeHolder: d.mergeHolder === forkId ? null : d.mergeHolder,
+    selectedId: cursorAfterRemoving(d, forkId),
+  }
+  const item = base.items.find(i => i.id === fork.itemId)
+  if (outcome === 'drop') {
+    return item?.status === 'forked' ? { ...base, items: base.items.filter(i => i.id !== item.id) } : base
+  }
+  if (item) return runNext({ ...base, items: base.items.map(i => (i.id === item.id ? { ...i, status: 'queued' } : i)) }, item.id)
+
+  const added = addItem(base, fork.text, 'you')
+
+  return runNext(added.data, added.item.id)
 }
 
 export function editItem(d: QData, id: string, text: string): QData {

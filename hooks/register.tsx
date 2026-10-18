@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { QData, QFork, QForkKind, QItem, QPause } from '../types'
-import type { ListRow } from './list'
+import type { ListRow, ListTone } from './list'
 import {
   EMPTY,
   QUEUE_SECTION,
@@ -20,6 +20,8 @@ import {
   judgeBash,
   judgeForkPath,
   mergeGoText,
+  cursorForkOf,
+  cursorId,
   cursorOf,
   moveCursor,
   moveItem,
@@ -30,6 +32,7 @@ import {
   parseControl,
   parseForkMarker,
   rebaseText,
+  removeFork,
   removeItem,
   runNext,
   setFork,
@@ -534,6 +537,123 @@ function forkOfAgent(d: QData, agentId: string | undefined): QFork | undefined {
   return agentId === undefined ? undefined : d.forks.find(f => f.agentId === agentId)
 }
 
+// ── Managing forks ──────────────────────────────────────────────────────────
+
+const RUNNING_FORK: QFork['status'][] = ['starting', 'working', 'ready']
+
+/** Stops a fork that may still be working. Says what could not be done, if anything. */
+async function stopFork($: $, fork: QFork): Promise<string | undefined> {
+  if (!RUNNING_FORK.includes(fork.status)) return undefined
+
+  if (fork.kind === 'agent') {
+    if (!fork.agentId) return undefined
+    try {
+      await $.tool.call({ tool: 'TaskStop', task_id: fork.agentId })
+    } catch {
+      // Already ended: nothing to stop.
+    }
+
+    return undefined
+  }
+
+  // A session fork: find its background session by the id it reported.
+  if (!fork.sessionId) return 'its session never reported in, so it may still be running'
+  const listed = await $.process.run(['env', ...SCRUB.flatMap(name => ['-u', name]), 'claude', 'agents', '--json'], {
+    timeoutMs: 30_000,
+  }).catch(() => undefined)
+  let sessions: { id?: unknown; sessionId?: unknown }[] = []
+  try {
+    sessions = listed?.exitCode === 0 ? JSON.parse(listed.stdout) : []
+  } catch {
+    sessions = []
+  }
+  const session = sessions.find(x => x.sessionId === fork.sessionId)
+  if (!session) return undefined
+  const stopped = await $.process
+    .run(['env', ...SCRUB.flatMap(name => ['-u', name]), 'claude', 'stop', String(session.id)], { timeoutMs: 30_000 })
+    .catch(err => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+
+  return stopped.exitCode === 0 ? undefined : `claude stop failed: ${stopped.stderr.trim().slice(0, 120)}`
+}
+
+/**
+ * Removes a fork's worktree and branch. `force` deletes the branch whatever it
+ * holds; without it, git keeps a branch that is not merged. Says what was left.
+ */
+async function cleanUpFork($: $, fork: QFork, force: boolean): Promise<string[]> {
+  const root = await repoRoot($)
+  if (!root) return ['not in a git repository']
+
+  // A session fork that never reported in: find its worktree by the name it was given.
+  let { worktree, branch } = fork
+  if (!worktree || !branch) {
+    const list = await git($, ['worktree', 'list', '--porcelain'], root)
+    const name = `/.claude/worktrees/q-${slugOf(fork.text)}-${fork.id}`
+    const entry = list.stdout.split('\n\n').find(block => block.split('\n')[0]?.endsWith(name))
+    worktree ??= entry?.split('\n')[0]?.replace(/^worktree /, '')
+    branch ??= entry
+      ?.split('\n')
+      .find(line => line.startsWith('branch '))
+      ?.replace(/^branch refs\/heads\//, '')
+  }
+
+  const left: string[] = []
+  if (worktree) {
+    const removed = await git($, ['worktree', 'remove', '--force', worktree], root)
+    if (removed.exitCode !== 0 && !/is not a working tree/.test(removed.stderr)) left.push(`worktree ${worktree}`)
+  }
+  await git($, ['worktree', 'prune'], root)
+  if (branch) {
+    const deleted = await git($, ['branch', force ? '-D' : '-d', branch], root)
+    if (deleted.exitCode !== 0 && !/not found/.test(deleted.stderr)) left.push(`branch ${branch}`)
+  }
+
+  return left
+}
+
+/** Delete (`drop`) or send back a fork: stop it, remove its worktree and branch, take it off the list. */
+async function retireFork($: $, forkId: string, outcome: 'drop' | 'send-back'): Promise<void> {
+  const d = await read($, data)
+  const fork = d.forks.find(f => f.id === forkId)
+  if (!fork) return
+  if (fork.status === 'merging' || d.mergeHolder === forkId) {
+    $.ui.toast('q: that fork is merging into your checkout; stopping it now could leave a half-done merge. Wait for it.')
+
+    return
+  }
+  if (outcome === 'send-back' && fork.status === 'merged') {
+    $.ui.toast('q: that fork is already merged; nothing to send back')
+
+    return
+  }
+
+  const problem = await stopFork($, fork)
+  const left = await cleanUpFork($, fork, true)
+  await mutate($, x => removeFork(x, forkId, outcome))
+  if (outcome === 'send-back') later($, () => pump($))
+
+  const done = outcome === 'drop' ? 'deleted' : 'sent back to the queue'
+  const leftover = [problem, left.length ? `left behind: ${left.join(', ')}` : undefined].filter(Boolean).join('; ')
+  $.ui.toast(`q: fork "${fork.text.slice(0, 40)}" ${done}${leftover ? ` (${leftover})` : ''}`)
+}
+
+/** Clears done tasks and merged forks, removing each merged fork's worktree and branch. */
+async function clearFinished($: $): Promise<void> {
+  const merged = (await read($, data)).forks.filter(f => f.status === 'merged')
+  const left: string[] = []
+  for (const fork of merged) left.push(...(await cleanUpFork($, fork, false)))
+
+  await mutate($, x => {
+    let next: QData = { ...x, items: x.items.filter(i => i.status !== 'done') }
+    for (const fork of merged) next = removeFork(next, fork.id, 'drop')
+
+    return next
+  })
+  if (merged.length) {
+    $.ui.toast(`q: cleared ${merged.length} merged fork${merged.length === 1 ? '' : 's'}${left.length ? ` (left behind: ${left.join(', ')})` : ''}`)
+  }
+}
+
 // ── Pane actions ────────────────────────────────────────────────────────────
 
 /** What a key or a button in the pane asks for; task actions apply to the task under the cursor. */
@@ -565,9 +685,17 @@ async function handleAction($: $, action: string): Promise<void> {
     case 'edit':
       await onCursor((x, id) => ({ ...x, editingId: id }))
       break
-    case 'delete':
-      await onCursor(removeItem)
+    case 'delete': {
+      const fork = cursorForkOf(await read($, data))
+      if (fork) await retireFork($, fork.id, 'drop')
+      else await onCursor(removeItem)
       break
+    }
+    case 'send-back': {
+      const fork = cursorForkOf(await read($, data))
+      if (fork) await retireFork($, fork.id, 'send-back')
+      break
+    }
     case 'run-next':
       await onCursor(runNext)
       break
@@ -588,7 +716,7 @@ async function handleAction($: $, action: string): Promise<void> {
       await toggleDefault($)
       break
     case 'clear-done':
-      await mutate($, x => ({ ...x, items: x.items.filter(i => i.status !== 'done') }))
+      await clearFinished($)
       break
   }
 }
@@ -1030,14 +1158,26 @@ export const register: Register = on => {
     }
     isPaneFocused = e.props.isFocused
 
-    const cursor = cursorOf(d)
+    const cursorAt = cursorId(d)
     const editing = d.items.find(i => i.id === d.editingId)
     // Where the surface draws a Client, the list hears keys itself (K/J included);
     // elsewhere the buttons carry the hotkeys, with w/s for moving.
     const Client = 'Client' in table ? table.Client : undefined
 
     const visible = visibleItems(d)
-    const live = d.forks.filter(f => f.status !== 'merged').concat(d.forks.filter(f => f.status === 'merged').slice(-2))
+    const forkTone: Record<string, ListTone> = { failed: 'red', ready: 'green', merging: 'yellow' }
+    const forkRow = (f: QFork): ListRow => ({
+      id: f.id,
+      isHeading: false,
+      head: '⑂',
+      who: f.kind === 'agent' ? 'agent  ' : 'session',
+      isClaude: false,
+      text: `${clip(f.text, Math.max(10, width - 52))}  ${f.branch ?? ''}`,
+      note: f.status === 'failed' && f.note ? `failed: ${clip(f.note, 50)}` : f.status,
+      tone: forkTone[f.status] ?? '',
+      isCursor: f.id === cursorAt,
+      isDone: f.status === 'merged',
+    })
     const waiting = d.items.filter(i => i.status === 'queued').length
     const state = d.paused
       ? `paused: ${d.paused.reason}`
@@ -1085,23 +1225,33 @@ export const register: Register = on => {
           ))}
         {visible.length === 0 && <Text dimColor>Nothing queued. Type a task above, or /q &lt;task&gt; from the prompt.</Text>}
         {Client ? (
-          visible.length > 0 && (
+          (visible.length > 0 || d.forks.length > 0) && (
             <Client
               key="list"
               module="./list.tsx"
               props={{
-                rows: visible.map(
-                  (i): ListRow => ({
-                    id: i.id,
-                    head: `${mark[i.status] ?? ' '} #${i.id.slice(1)}`,
-                    who: i.source === 'claude' ? 'claude' : 'you   ',
-                    isClaude: i.source === 'claude',
-                    text: clip(i.text, width - 22).padEnd(Math.max(0, width - 22)),
-                    note: i.status === 'proposed' ? 'needs approval (y)' : '',
-                    isCursor: i.id === cursor?.id,
-                    isDone: i.status === 'done',
-                  }),
-                ),
+                rows: [
+                  ...visible.map(
+                    (i): ListRow => ({
+                      id: i.id,
+                      isHeading: false,
+                      head: `${mark[i.status] ?? ' '} #${i.id.slice(1)}`,
+                      who: i.source === 'claude' ? 'claude' : 'you   ',
+                      isClaude: i.source === 'claude',
+                      text: clip(i.text, width - 22).padEnd(Math.max(0, width - 22)),
+                      note: i.status === 'proposed' ? 'needs approval (y)' : '',
+                      tone: 'yellow',
+                      isCursor: i.id === cursorAt,
+                      isDone: i.status === 'done',
+                    }),
+                  ),
+                  ...(d.forks.length > 0
+                    ? [
+                        { ...forkRow(d.forks[0] as QFork), id: 'heading:forks', isHeading: true, text: 'Forks', isCursor: false },
+                        ...d.forks.map(forkRow),
+                      ]
+                    : []),
+                ],
               }}
             />
           )
@@ -1110,11 +1260,11 @@ export const register: Register = on => {
             <Button
               key={`item:${i.id}`}
               plain
-              dimColor={i.status === 'done' && i.id !== cursor?.id}
+              dimColor={i.status === 'done' && i.id !== cursorAt}
               onPress={() => mutate($, x => ({ ...x, selectedId: i.id }))}
             >
-              <Text inverse={i.id === cursor?.id}>
-                {i.id === cursor?.id ? '› ' : '  '}
+              <Text inverse={i.id === cursorAt}>
+                {i.id === cursorAt ? '› ' : '  '}
                 {mark[i.status] ?? ' '} #{i.id.slice(1)}{' '}
                 <Text color={i.source === 'claude' ? 'cyan' : undefined}>{i.source === 'claude' ? 'claude' : 'you   '}</Text>{' '}
                 {clip(i.text, width - 22).padEnd(Math.max(0, width - 22))}
@@ -1123,16 +1273,19 @@ export const register: Register = on => {
             </Button>
           ))
         )}
-        {live.length > 0 && <Text bold>Forks</Text>}
-        {live.map(f => (
-          <Text key={`fork:${f.id}`} dimColor={f.status === 'merged'}>
-            {'  ⑂ '}
-            {f.kind === 'agent' ? 'agent  ' : 'session'} {clip(f.text, Math.max(10, width - 48))}{' '}
-            <Text dimColor>{f.branch ?? ''}</Text>{' '}
-            <Text color={f.status === 'failed' ? 'red' : f.status === 'ready' ? 'green' : undefined}>{f.status}</Text>
-            {f.note && f.status === 'failed' ? <Text dimColor> {clip(f.note, 60)}</Text> : ''}
-          </Text>
-        ))}
+        {!Client && d.forks.length > 0 && <Text bold>Forks</Text>}
+        {!Client &&
+          d.forks.map(f => {
+            const row = forkRow(f)
+
+            return (
+              <Button key={`item:${f.id}`} plain dimColor={row.isDone && !row.isCursor} onPress={() => mutate($, x => ({ ...x, selectedId: f.id }))}>
+                <Text inverse={row.isCursor}>
+                  {row.isCursor ? '› ' : '  '}⑂ {row.who} {row.text} <Text color={row.tone || undefined}>{row.note}</Text>
+                </Text>
+              </Button>
+            )
+          })}
         <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
           {[
             { action: 'edit', key: 'e', label: 'edit' },
@@ -1147,7 +1300,8 @@ export const register: Register = on => {
             { action: 'fork-agent', key: 'a', label: 'fork agent' },
             { action: 'pause', key: 'p', label: d.paused ? 'resume' : 'pause' },
             { action: 'default', key: 'm', label: d.isDefault ? 'default off' : 'default on' },
-            { action: 'clear-done', key: 'c', label: 'clear done' },
+            { action: 'send-back', key: 'b', label: 'send back' },
+            { action: 'clear-done', key: 'c', label: 'clear finished' },
           ].map(b =>
             Client ? (
               // The list takes the keys; these stay for the mouse, the key in the accent colour.

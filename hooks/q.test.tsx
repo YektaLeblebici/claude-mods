@@ -13,8 +13,11 @@ import {
   judgeForkPath,
   isQueueable,
   isSameCommand,
+  cursorForkOf,
+  moveCursor,
   moveItem,
   paneFocusTarget,
+  removeFork,
   parseCommand,
   parseControl,
   parseForkMarker,
@@ -103,6 +106,40 @@ describe('list keys', () => {
     expect(actionOf({ key: 'd' })).toBe('delete')
     expect(actionOf({ key: 'D' })).toBeUndefined()
     expect(actionOf({ key: 'k', ctrl: true })).toBeUndefined()
+  })
+})
+
+describe('forks in the pane', () => {
+  const withFork = () => {
+    let d = addItem(EMPTY, 'waiting task', 'you').data
+    d = addItem(d, 'forked task', 'you').data
+    d = {
+      ...d,
+      items: d.items.map(i => (i.id === 'i2' ? { ...i, status: 'forked' as const } : i)),
+      forks: [{ id: 'f3', itemId: 'i2', text: 'forked task', kind: 'agent' as const, status: 'failed' as const, token: 't' }],
+      seq: 3,
+    }
+
+    return d
+  }
+
+  test('the cursor walks from the tasks onto the forks', () => {
+    const d = moveCursor(withFork(), 1)
+
+    expect(cursorForkOf(d)?.id).toBe('f3')
+  })
+
+  test('deleting a fork drops its task; sending it back queues the task first', () => {
+    const dropped = removeFork(withFork(), 'f3', 'drop')
+    expect(dropped.forks).toEqual([])
+    expect(dropped.items.map(i => i.text)).toEqual(['waiting task'])
+
+    const sent = removeFork(withFork(), 'f3', 'send-back')
+    expect(sent.items.map(i => `${i.text}:${i.status}`)).toEqual(['forked task:queued', 'waiting task:queued'])
+
+    // Its task gone from the list (cleared): it comes back as a new task, first in line.
+    const gone = { ...withFork(), items: withFork().items.filter(i => i.id !== 'i2') }
+    expect(removeFork(gone, 'f3', 'send-back').items.map(i => i.text)).toEqual(['forked task', 'waiting task'])
   })
 })
 
@@ -441,6 +478,75 @@ describe('the mod', () => {
     await clock.advance(60)
 
     expect(await ui.find({ type: 'Text', text: /something/, in: 'list' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test('d deletes, b sends back and c clears merged forks, each cleaned up; a merging fork is left alone', async ($, on) => {
+    const clock = mock.clock(on)
+    const fork = (id: string, status: string, extra: object = {}) => ({
+      id, itemId: `i${id.slice(1)}`, text: `task ${id}`, kind: 'agent', status, token: 't',
+      branch: `q/task-${id}`, worktree: `/repo/.claude/worktrees/q-task-${id}`, agentId: `agent-${id}`, ...extra,
+    })
+    const saved = {
+      ...EMPTY,
+      seq: 5,
+      items: ['f1', 'f2', 'f3', 'f4'].map(id => ({ id: `i${id.slice(1)}`, text: `task ${id}`, source: 'you', status: 'forked', rootId: `i${id.slice(1)}` })),
+      forks: [fork('f1', 'working'), fork('f2', 'failed'), fork('f3', 'merged'), fork('f4', 'merging')],
+      mergeHolder: 'f4',
+    }
+    mock.store(on, { 'session:main-session': saved })
+    const ran: string[] = []
+    on('process.run', ($, e) => {
+      ran.push(e.argv.join(' '))
+      const args = e.argv.join(' ')
+
+      return { value: { exitCode: 0, stdout: args.includes('--show-toplevel') ? '/repo\n' : '', stderr: '' } } as never
+    })
+    const stopped: unknown[] = []
+    on('tool.call', { tool: 'TaskStop' }, ($, e) => {
+      stopped.push((e as { task_id?: unknown }).task_id)
+
+      return { result: 'stopped' } as never
+    })
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    const key = async (k: string) => {
+      await ui.key({ key: k, in: 'list' })
+      await ui.advance(16)
+      await clock.advance(10)
+    }
+
+    // The cursor starts on the first fork (no tasks are listed): delete the working one.
+    await key('d')
+    expect(stopped).toEqual(['agent-f1'])
+    expect(ran).toContain('git worktree remove --force /repo/.claude/worktrees/q-task-f1')
+    expect(ran).toContain('git branch -D q/task-f1')
+    let text = await listed($)
+    expect(text).not.toContain('fork f1')
+    expect(text).not.toContain('task f1')
+
+    // Now on the failed one: send it back to the front of the queue.
+    await key('b')
+    expect(ran).toContain('git branch -D q/task-f2')
+    text = await listed($)
+    expect(text).not.toContain('fork f2')
+    expect(text).toContain('#2 [queued] (you) task f2')
+
+    // Clear finished: the merged fork goes, its branch removed only if merged (-d).
+    await key('c')
+    expect(ran).toContain('git branch -d q/task-f3')
+    text = await listed($)
+    expect(text).not.toContain('fork f3')
+
+    // The merging fork refuses delete: stopping it could leave a half-done merge.
+    const before = ran.length
+    await ui.press({ key: 'cursor-down' })
+    await key('d')
+    expect(await listed($)).toContain('fork f4 [merging]')
+    expect(ran.slice(before).some(c => c.includes('f4'))).toBe(false)
     await ui.unmount()
   })
 
