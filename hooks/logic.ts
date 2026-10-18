@@ -64,6 +64,14 @@ export function moveCursor(d: QData, delta: -1 | 1): QData {
   return to ? { ...d, selectedId: to.id } : d
 }
 
+/**
+ * Where the keys go when the pane takes the keyboard and the click put the ring on
+ * nothing: the task list when it is drawn as a Client, else the add-task input.
+ */
+export function paneFocusTarget(d: QData, hasClient: boolean): string {
+  return hasClient && visibleItems(d).length > 0 ? 'list' : `new:${d.seq}`
+}
+
 /** Removes a waiting item; the cursor goes to the row that took its place. */
 export function removeItem(d: QData, id: string): QData {
   const item = d.items.find(i => i.id === id)

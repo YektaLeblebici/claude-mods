@@ -14,6 +14,7 @@ import {
   isQueueable,
   isSameCommand,
   moveItem,
+  paneFocusTarget,
   parseCommand,
   parseControl,
   parseForkMarker,
@@ -418,6 +419,28 @@ describe('the mod', () => {
     const row = (await ui.findAll({ type: 'Box' })).find(b => b.props.flexWrap === 'wrap')
     expect(row?.props).toMatchObject({ flexDirection: 'row', flexWrap: 'wrap', columnGap: 2 })
     expect(row?.children.filter(c => (c as { type?: string }).type !== 'Button')).toEqual([])
+    await ui.unmount()
+  })
+
+  test('a click that focuses nothing in the pane hands the keys to the list, or the input when empty', () => {
+    const one = addItem(EMPTY, 'something', 'you').data
+
+    expect(paneFocusTarget(one, true)).toBe('list')
+    expect(paneFocusTarget(EMPTY, true)).toBe('new:0')
+    // Surfaces without a Client draw the tasks as buttons: the input takes the keys.
+    expect(paneFocusTarget(one, false)).toBe('new:1')
+  })
+
+  test('the pane taking the keyboard redraws without trouble', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    await $.command.run({ command: 'q', args: 'something' })
+    const props = (isFocused: boolean) => ({ ...(PANE_PROPS as object), isFocused }) as never
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: props(false) })
+    await ui.redraw(props(true))
+    await clock.advance(60)
+
+    expect(await ui.find({ type: 'Text', text: /something/, in: 'list' })).toBeDefined()
     await ui.unmount()
   })
 

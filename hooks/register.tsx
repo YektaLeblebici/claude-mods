@@ -25,6 +25,7 @@ import {
   moveItem,
   nextQueued,
   nextReadyFork,
+  paneFocusTarget,
   parseCommand,
   parseControl,
   parseForkMarker,
@@ -595,6 +596,13 @@ async function handleAction($: $, action: string): Promise<void> {
 // ── Hooks ───────────────────────────────────────────────────────────────────
 
 export const register: Register = on => {
+  // Where the pane's focus ring is, so a click that lands on nothing focusable
+  // (blank space, a heading) can hand the keys to the list. Only the drawing uses
+  // these, and a reload starting them over costs nothing.
+  let isPaneFocused = false
+  let ringMoves = 0
+
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await restore($)
@@ -988,6 +996,7 @@ export const register: Register = on => {
 
   // ── The pane ──
   on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    ringMoves += 1
     const element = e.element
     if (element?.startsWith('item:')) {
       await mutate($, d => ({ ...d, selectedId: element.slice(5) }))
@@ -1009,6 +1018,17 @@ export const register: Register = on => {
     const Input = 'Input' in table ? table.Input : undefined
     const d = await read($, data)
     const width = Math.max(30, e.props.bodyColumns ?? 80)
+
+    // The pane just took the keyboard: unless the click put the ring on something
+    // (the list, the input, a button), give it to the list, or the input when empty.
+    if (e.props.isFocused && !isPaneFocused) {
+      const movesAtClick = ringMoves
+      const target = paneFocusTarget(d, 'Client' in table)
+      $.clock.after(50, () => {
+        if (ringMoves === movesAtClick) void $.ui.focus({ requestId: PANE, key: target }).catch(() => undefined)
+      })
+    }
+    isPaneFocused = e.props.isFocused
 
     const cursor = cursorOf(d)
     const editing = d.items.find(i => i.id === d.editingId)
