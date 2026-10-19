@@ -231,9 +231,16 @@ describe('the mod', () => {
 
   // The engine beneath a queued command: the command list, git (no repository),
   // and the run itself, which renders a skill's prompt as the engine does.
-  const commandWorld = ($: Engine, on: On, commands: { name: string; source: string }[]) => {
+  const commandWorld = (
+    $: Engine,
+    on: On,
+    commands: { name: string; source: string }[],
+    agents: { id: string; description: string; type: string; status: string }[] = [],
+    onRun: (e: { command: string; args: string }) => void = () => {},
+  ) => {
     on('process.run', () => ({ value: { exitCode: 128, stdout: '', stderr: 'not a git repository' } }) as never)
     on('command.list', () => ({ value: commands.map(c => ({ ...c, description: '' })) }) as never)
+    on('agent.list', () => ({ value: [...agents] }) as never)
     on('skill.prompt', (_, e) => ({ text: e.text }))
     on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
     on('turn.complete', (_, e) => ({ text: e.answer }) as never)
@@ -241,6 +248,7 @@ describe('the mod', () => {
     const prompts: string[] = []
     on('command.run', async (_, e) => {
       ran.push(`${e.command} ${e.args}`.trim())
+      onRun(e)
       if (commands.some(c => c.name === e.command && c.source !== 'builtin' || e.command === 'code-review')) {
         prompts.push((await $.skill.prompt({ skill: e.command, text: 'Review the diff.' } as never)).text)
       }
@@ -298,6 +306,48 @@ describe('the mod', () => {
 
     await clock.advance(2_000)
     expect(await listed($)).toContain('/code-review ran but never started a turn')
+  })
+
+  test('a forked skill waits for its background agent, however long, and finishes with its notification turn', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const agent = { id: 'a1', description: `/code-review --fix`, type: 'code-review', status: 'running' }
+    const agents: (typeof agent)[] = []
+    commandWorld($, on, [{ name: 'code-review', source: 'builtin' }], agents, () => agents.push(agent))
+
+    await runQ($, '/code-review --fix')
+    await clock.advance(10)
+
+    // Four minutes in, the agent still works: no pause, and a turn the person starts is not the command's.
+    await clock.advance(240_000)
+    expect(await listed($)).not.toContain('never started a turn')
+    await $.turn.start({ text: 'what is 2 + 2?', turnId: 't1' } as never)
+    await $.turn.complete({ answer: '4', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(await listed($)).toContain('[running] (you) /code-review --fix')
+
+    agent.status = 'completed'
+    const note = '<task-notification> <task-id>a1</task-id> <status>completed</status> </task-notification>'
+    await $.turn.start({ text: note, turnId: 't2' } as never)
+    await $.turn.complete({ answer: 'Committed the fixes.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+    expect(await listed($)).toContain('[done] (you) /code-review --fix')
+    expect(await listed($)).not.toContain('no turn picked up')
+  })
+
+  test('a forked skill whose agent ended with no turn after it pauses the queue', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const agent = { id: 'a1', description: '/code-review', type: 'code-review', status: 'running' }
+    const agents: (typeof agent)[] = []
+    commandWorld($, on, [{ name: 'code-review', source: 'builtin' }], agents, () => agents.push(agent))
+
+    await runQ($, '/code-review')
+    await clock.advance(10)
+    await clock.advance(90_000)
+    expect(await listed($)).not.toContain('no turn picked up')
+
+    agent.status = 'killed'
+    await clock.advance(61_000)
+    expect(await listed($)).toContain('/code-review ran in the background, but no turn picked up its result')
   })
 
   test('/q refuses commands that would wipe the conversation', async ($, on) => {

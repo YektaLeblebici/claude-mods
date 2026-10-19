@@ -38,6 +38,8 @@ export type QPendingCommand = {
   /** The queue's instructions, for the skill's prompt to carry. */
   footer: string
   isWrapped: boolean
+  /** A forked skill's background agent, whose task notification starts the command's turn. */
+  agentId?: string
 }
 
 export type QPauseKind = 'user' | 'interrupted' | 'question' | 'dirty' | 'restored' | 'merge'

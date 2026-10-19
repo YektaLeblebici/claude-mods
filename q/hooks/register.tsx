@@ -224,12 +224,29 @@ async function pump($: $): Promise<void> {
 /** How long a skill's turn may take to start before the queue pauses and says so. */
 const TURN_START_LIMIT_MS = 60_000
 
+/** Where an agent's loop stands while it is still at work, its task notification yet to come. */
+const LIVE_AGENT = new Set(['pending', 'running', 'waiting'])
+
+async function agentsNow($: $) {
+  return $.agent.list().catch(() => [])
+}
+
+async function isAgentLive($: $, agentId: string): Promise<boolean> {
+  const agent = (await agentsNow($)).find(a => a.id === agentId)
+
+  return agent !== undefined && LIVE_AGENT.has(agent.status)
+}
+
 /**
  * Runs a queued slash command as if typed. Whether it starts a turn is known up
  * front (`isQueueable`): a skill or prompt command finishes with its turn, as a
  * typed task does; a session or mod command (`/compact`, `/rpg`) is done once it
  * has run. A skill's prompt picking up the queue's instructions (`isWrapped`)
  * also means a turn is coming, for a bundled skill `QUEUED_BUILTINS` misses.
+ *
+ * A forked skill (`/code-review`) runs in a background agent and the command
+ * returns at once: its turn is the one the agent's task notification starts,
+ * however long the agent takes, so the backstop waits while the agent is live.
  */
 async function runCommand($: $, item: QItem, command: { name: string; args: string }, footer: string): Promise<void> {
   await mutate($, x => ({ ...x, pendingCommand: { itemId: item.id, name: command.name, footer, isWrapped: false } }))
@@ -237,6 +254,7 @@ async function runCommand($: $, item: QItem, command: { name: string; args: stri
   const info = (await $.command.list()).find(c => c.name === command.name)
   const isSkill = info === undefined || isQueueable(info)
   const isWaiting = (x: QData) => x.runningId === item.id && x.runningTurnId === null
+  const before = new Set((await agentsNow($)).map(a => a.id))
 
   const ran = await $.command.run({ command: command.name, args: command.args }).then(
     () => true,
@@ -252,8 +270,17 @@ async function runCommand($: $, item: QItem, command: { name: string; args: stri
   )
   if (!ran) return
 
+  const forked = (await agentsNow($)).find(
+    a => !before.has(a.id) && a.parentId === undefined && a.description.startsWith(`/${command.name}`),
+  )
+  if (forked) {
+    await mutate($, x =>
+      x.pendingCommand?.itemId === item.id ? { ...x, pendingCommand: { ...x.pendingCommand, agentId: forked.id } } : x,
+    )
+  }
+
   const { pendingCommand } = await read($, data)
-  const expectsTurn = isSkill || (pendingCommand?.itemId === item.id && pendingCommand.isWrapped)
+  const expectsTurn = forked !== undefined || isSkill || (pendingCommand?.itemId === item.id && pendingCommand.isWrapped)
   if (!expectsTurn) {
     await mutate($, x => (isWaiting(x) ? { ...finishRunning(x), isBusy: false } : x))
     later($, () => pump($))
@@ -261,22 +288,29 @@ async function runCommand($: $, item: QItem, command: { name: string; args: stri
     return
   }
 
-  // Backstop: a turn that never comes (the skill failed to load) pauses the queue
-  // rather than holding it, or marking a task done that never ran.
-  $.clock.after(TURN_START_LIMIT_MS, () => {
-    void mutate($, x =>
+  // Backstop: a turn that never comes (the skill failed to load, or its background
+  // agent ended with no turn picking up its result) pauses the queue rather than
+  // holding it, or marking a task done that never ran.
+  const arm = () => $.clock.after(TURN_START_LIMIT_MS, () => later($, check))
+  const check = async () => {
+    if (forked && (await isAgentLive($, forked.id))) return arm()
+
+    await mutate($, x =>
       isWaiting(x)
         ? {
             ...x,
             isBusy: false,
             paused: {
               kind: 'question',
-              reason: `/${command.name} ran but never started a turn. Press p to mark it done and continue.`,
+              reason: forked
+                ? `/${command.name} ran in the background, but no turn picked up its result. Press p to mark it done and continue.`
+                : `/${command.name} ran but never started a turn. Press p to mark it done and continue.`,
             },
           }
         : x,
     )
-  })
+  }
+  arm()
 }
 
 async function add($: $, text: string): Promise<QItem> {
@@ -893,11 +927,16 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     if (e.agentId === undefined) {
       const marker = parseForkMarker(e.text)
+      // While a forked skill's agent works, a turn of the person's is not the command's.
+      const forkedId = (await read($, data)).pendingCommand?.agentId
+      const isForkWorking =
+        forkedId !== undefined && !e.text.includes(`<task-id>${forkedId}</task-id>`) && (await isAgentLive($, forkedId))
       await mutate($, d => {
         const running = d.items.find(i => i.id === d.runningId)
         const isOurs =
           running !== undefined &&
-          (e.text.includes(itemTag(running)) || (d.pendingCommand?.itemId === running.id && d.runningTurnId === null))
+          (e.text.includes(itemTag(running)) ||
+            (d.pendingCommand?.itemId === running.id && d.runningTurnId === null && !isForkWorking))
 
         return {
           ...d,
