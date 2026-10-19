@@ -4,7 +4,6 @@ import type { Item, Save } from '../types'
 import { BIOMES, FOE_TONES, HERO_TONES, HERO_VERBS } from './content'
 import { FOE_STEPS, HERO_STEPS, hitTier, makeEnemy, newSave, setLuck, tick } from './engine'
 import { composePixelScene } from './pixel'
-import { composeScene } from './scene'
 
 const seeded = (seed: number) => () => {
   seed = (seed + 0x6d2b79f5) | 0
@@ -73,9 +72,9 @@ test('bosses keep their own names in battle text', () => {
   expect(text.includes('The Vulkazar') || text.includes('the Vulkazar')).toBe(false)
 })
 
-test('the band caption shows a hard hit in its colour and bold, in both art styles', () => {
+test('the band caption shows a hard hit in its colour and bold', () => {
   const s: Save = { ...newSave(always(0.5)), log: [{ kind: 'combat', text: 'You DEVASTATE the Dire Wolf for 25!!', tone: HERO_TONES[3], strong: true }] }
-  for (const rows of [composeScene(s, 0, null, 60), composePixelScene(s, 0, null, 60)]) {
+  for (const rows of [composePixelScene(s, 0, null, 60)]) {
     const seg = rows[5]!.find(r => r.text.includes('DEVASTATE'))!
     expect(seg.color).toBe(HERO_TONES[3])
     expect(seg.bold).toBe(true)

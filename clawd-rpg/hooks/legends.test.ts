@@ -5,7 +5,6 @@ import { COMMON_PETS, LEGENDS, PETS } from './content'
 import { gainPet, makeEnemy, newSave, tick, wildCharacters } from './engine'
 import { composePixelScene } from './pixel'
 import { PET_Q } from './quarterart'
-import { composeScene } from './scene'
 
 const always = (value: number) => () => value
 const atLevel = (level: number, beaten: LegendId[] = []): Save => {
@@ -100,14 +99,13 @@ test('battle text names a wild character by name, without "the"', () => {
   expect(/the Linux Tarbolts/i.test(text)).toBe(false)
 })
 
-test('every wild character has its own pet look, drawn in both art styles', () => {
+test('every wild character has its own pet look, drawn in the band', () => {
   for (const legend of LEGENDS) {
-    expect(PETS[legend.id].art.length).toBe(2)
     expect(PET_Q[legend.id].length).toBe(4)
     const s = atLevel(legend.minLevel)
     gainPet(s, legend.id, [], [])
     expect(s.hero.activePet).toBe(legend.id)
-    for (const compose of [composeScene, composePixelScene]) {
+    for (const compose of [composePixelScene]) {
       const rows = compose(s, 1, null, 60)
       expect(rows.length).toBe(6)
       for (const row of rows) expect([...row.map(seg => seg.text).join('')].length).toBe(60)

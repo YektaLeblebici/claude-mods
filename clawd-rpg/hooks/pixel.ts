@@ -19,7 +19,6 @@ import {
   activeFx,
   ARCHETYPES,
   archetypeOf,
-  biomeFoeColors,
   CLAWD,
   FX_FRAMES,
   KIND_COLOR,
@@ -205,7 +204,6 @@ class Canvas {
 export function composePixelScene(save: Save, frame: number, burst: Burst | null, width: number, captionAge = 0): Segment[][] {
   const W = Math.max(30, Math.min(width, 72))
   const look = QUARTER_LOOKS[save.zone.biome] ?? QUARTER_LOOKS.meadow!
-  const colors = biomeFoeColors(save.zone.biome)
   const p = new Canvas(W, Object.values(look.ground.palette)[0]!)
   const active = activeFx(burst, frame)
   const fx = active?.fx
@@ -279,7 +277,7 @@ export function composePixelScene(save: Save, frame: number, burst: Burst | null
 
   // The enemy.
   if (enemy && showEnemy) {
-    const body = enemy.tint ?? (enemy.isBoss ? colors.boss : colors.foe)
+    const body = enemy.tint ?? (enemy.isBoss ? look.boss : look.foe)
     const archetype = archetypeOf(enemy)
     const grid = ENEMY_PX[archetype]![Math.floor(frame / 2) % 2]!
     // Width in text cells.
@@ -328,7 +326,8 @@ export function composePixelScene(save: Save, frame: number, burst: Burst | null
 
   // Caption, as in the text-art scene.
   const st = heroStats(save.hero)
-  const hp = `♥${save.hero.hp}/${st.maxHp} Lv${save.hero.level} │ `
+  // The level is on the status line above; here, just health.
+  const hp = `♥${save.hero.hp}/${st.maxHp} │ `
   const last = save.log[save.log.length - 1]
   const next = nextLuck(save)
   const luck = next === 'lucky' ? ' +luck' : next === 'unlucky' ? ' -luck' : ''

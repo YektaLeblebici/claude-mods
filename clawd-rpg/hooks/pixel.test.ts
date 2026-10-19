@@ -69,7 +69,10 @@ test('walking scrolls the ground by half a cell a frame', () => {
 
 test('the caption is kept as text', () => {
   const rows = composePixelScene(newSave(always(0.5)), 0, null, 60)
-  expect(rows[5]!.map(seg => seg.text).join('').startsWith('♥')).toBe(true)
+  const caption = rows[5]!.map(seg => seg.text).join('')
+  expect(caption.startsWith('♥38/38 │ ')).toBe(true)
+  // The level shows on the status line above, not here.
+  expect(caption.includes('Lv')).toBe(false)
 })
 
 test('the enemy nameplate sits right by its enemy: over it, or just beside it', () => {
@@ -109,53 +112,14 @@ function engineBeneath(on: On, disk: Record<string, unknown>) {
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 60, scroll: { offset: 0, bodyRows: 19 } }
 const run = ($: { command: { run: (e: never) => Promise<unknown> } }, args: string) => $.command.run({ command: 'rpg', args } as never) as Promise<{ text?: string }>
 
-test('pixel art is the default: with no style ever chosen, the band draws pixels, not text art', async ($, on) => {
+test('the band draws pixel art', async ($, on) => {
   mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
   engineBeneath(on, disk)
   await $.tool.call({ tool: 'Bash', command: 'true' })
-  await run($, 'anim')
-  expect(disk.style).toBe(undefined)
+  await run($, 'show')
   const band = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
   const picture = (await band.findAll({ type: 'Text' })).map(t => t.text).join('')
   expect([...picture].some(ch => '▘▝▖▗▌▐▚▞▛▜▙▟'.includes(ch))).toBe(true)
-  expect(picture.includes('▐▛███▜▌')).toBe(false)
   await band.unmount()
-})
-
-test('/rpg pixelart switches to text art, and the same command switches back to pixel art', async ($, on) => {
-  mock.clock(on)
-  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
-  engineBeneath(on, disk)
-  await $.tool.call({ tool: 'Bash', command: 'true' })
-
-  expect((await run($, 'pixelart')).text).toContain('text art on')
-  expect(disk.style).toBe('ascii')
-  await run($, 'anim')
-  const band = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
-  expect((await band.findAll({ type: 'Text', text: /▐▛███▜▌/ })).length > 0).toBe(true)
-  await band.unmount()
-
-  expect((await run($, 'pixelart')).text).toContain('pixel art on')
-  expect(disk.style).toBe('pixel')
-})
-
-test('switching to pixel art turns animation on', async ($, on) => {
-  mock.clock(on)
-  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 }, style: 'ascii' }
-  engineBeneath(on, disk)
-  expect((await run($, 'pixelart')).text).toContain('animation turned on too')
-  expect(disk.anim).toBe(true)
-})
-
-test('older saves that chose either earlier pixel mode count as pixel art; text art stays text art', async ($, on) => {
-  mock.clock(on)
-  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
-  engineBeneath(on, disk)
-  // Toggling from pixel art lands on text art, and from text art on pixel art.
-  for (const [stored, after] of [['quarter', 'ascii'], ['pixel', 'ascii'], ['ascii', 'pixel']] as const) {
-    disk.style = stored
-    await run($, 'pixelart')
-    expect(disk.style).toBe(after)
-  }
 })

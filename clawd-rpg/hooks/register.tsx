@@ -1,7 +1,7 @@
 import { update } from 'claude-code'
 import type { EngineInterface as Engine, Register, Timer } from 'claude-code'
 
-import type { ArtStyle, Burst, Enemy, Fx, LogKind, PetId, Rarity, Save } from '../types'
+import type { Burst, Enemy, Fx, LogKind, PetId, Rarity, Save, View } from '../types'
 import { ACHIEVEMENTS, AFFIX_INFO, MODIFIERS, PETS, SKILLS } from './content'
 import {
   bar,
@@ -20,50 +20,34 @@ import {
   xpToNext,
 } from './engine'
 import { composePixelScene } from './pixel'
-import { burstFx, composeScene, SCENE_ROWS } from './scene'
+import { burstFx, SCENE_ROWS } from './scene'
 import { mutate, revOf, type SaveIO } from './sync'
 
 const PANE = 'clawd-rpg'
 const COMMAND = 'rpg'
 const SAVE_KEY = 'save'
-const ANIM_KEY = 'anim'
-const STYLE_KEY = 'style'
-const HIDE_KEY = 'hidden'
-const HIDE_COMMAND = 'clawd'
+const VIEW_KEY = 'view'
 const BACKUP_KEY = 'save-backup'
 const RESET_WINDOW_MS = 2 * 60 * 1000
 const FRAME_MS = 333
 const SYNC_MS = 3000
+/** How long the band may go undrawn before the animation clock stops bumping frames. */
+const IDLE_MS = 2000
 const saveRef = { plugin: 'clawd-rpg', key: 'save' } as const
-const animOnRef = { plugin: 'clawd-rpg', key: 'animOn' } as const
+const viewRef = { plugin: 'clawd-rpg', key: 'view' } as const
 const frameRef = { plugin: 'clawd-rpg', key: 'frame' } as const
 const burstRef = { plugin: 'clawd-rpg', key: 'burst' } as const
-const styleRef = { plugin: 'clawd-rpg', key: 'style' } as const
-const hiddenRef = { plugin: 'clawd-rpg', key: 'hidden' } as const
-
-/** The band's art style: pixel art unless text art was chosen. Older saves' pixel modes all read as pixel art. */
-const readStyle = async ($: Engine): Promise<ArtStyle> => ((await $.store.get(STYLE_KEY)) === 'ascii' ? 'ascii' : 'pixel')
 
 /**
- * `/rpg pixelart`: from pixel art to text art and back. Switching to pixel art turns animation on.
- * `force` sets a style instead of toggling (an implicit show lands on pixel art).
+ * How much of the game shows: `show` the status line and the animated band, `mini` the status line
+ * alone, `hide` nothing (the game plays on). The last choice is kept; with none, `mini`. A store from
+ * before views reads its old switches: hidden as `hide`, animation on as `show`, otherwise `mini`.
  */
-async function toggleStyle($: Engine, force?: ArtStyle) {
-  const style: ArtStyle = force ?? ((await readStyle($)) === 'pixel' ? 'ascii' : 'pixel')
-  await $.store.set(STYLE_KEY, style)
-  await $.state.set(styleRef, style)
-  const wasOn = (await $.store.get(ANIM_KEY)) === true
-  if (style === 'pixel' && !wasOn) {
-    await $.store.set(ANIM_KEY, true)
-    await $.state.set(animOnRef, true)
-    setAnimation($, true)
-  }
-  return {
-    text:
-      style === 'ascii'
-        ? 'Claude RPG text art on. /rpg pixelart switches back to pixel art.'
-        : `Claude RPG pixel art on${wasOn ? '' : '; animation turned on too'}. /rpg pixelart switches to text art.`,
-  }
+async function readView($: Engine): Promise<View> {
+  const stored = await $.store.get(VIEW_KEY)
+  if (stored === 'show' || stored === 'mini' || stored === 'hide') return stored
+  if ((await $.store.get('hidden')) === true) return 'hide'
+  return (await $.store.get('anim')) === true ? 'show' : 'mini'
 }
 
 const RARITY_COLOR: Record<Rarity, string> = {
@@ -116,11 +100,10 @@ const advance = ($: Engine) =>
     await playBurst($, extra.fx, save.enemy ?? before.enemy)
   })
 
-/** Plays a burst of effects in the band, when animation mode is on. */
+/** Plays a burst of effects in the band, when the full view is on. */
 async function playBurst($: Engine, fx: Fx[], enemy: Enemy | null) {
-  const { value: isAnimOn } = await $.state.get(animOnRef)
   const played = burstFx(fx)
-  if (!isAnimOn || played.length === 0) return
+  if (view !== 'show' || played.length === 0) return
   const { value: at = 0 } = await $.state.get(frameRef)
   const burst: Burst = { fx: played, at, enemy }
   await $.state.set(burstRef, burst)
@@ -141,27 +124,18 @@ const commitChest = ($: Engine) =>
 const choosePet = ($: Engine, id: PetId) =>
   serial(() => mutate(storeIO($), current => ({ save: setActivePet(current, id), extra: null })))
 
-// Another session may have ticked or toggled animation: pick both up from the store.
+// Another session may have ticked or changed the view: pick both up from the store.
 async function refresh($: Engine) {
   const stored = await $.store.get(SAVE_KEY)
   if (isSave(stored)) {
     const { value: shown } = await $.state.get(saveRef)
     if (!shown || revOf(shown) !== revOf(stored)) await $.state.set(saveRef, stored)
   }
-  const hidden = (await $.store.get(HIDE_KEY)) === true
-  if (hidden !== isHidden) await setHidden($, hidden)
-  const style = await readStyle($)
-  const { value: shownStyle = 'pixel' } = await $.state.get(styleRef)
-  if (style !== shownStyle) await $.state.set(styleRef, style)
-  const isOn = (await $.store.get(ANIM_KEY)) === true
-  const { value: wasOn = false } = await $.state.get(animOnRef)
-  if (isOn !== wasOn) {
-    await $.state.set(animOnRef, isOn)
-    setAnimation($, isOn)
-  }
+  const chosen = await readView($)
+  if (chosen !== view) await setView($, chosen)
 }
 
-// The animation clock: one frame every FRAME_MS while animation mode is on.
+// The animation clock: one frame every FRAME_MS while the full view is on.
 // Module-scoped, so a reload drops it and session.start starts it again.
 let clock: Timer | null = null
 // When /rpg reset was asked for in this session; /rpg reset confirm only counts within RESET_WINDOW_MS of it.
@@ -172,87 +146,95 @@ let syncClock: Timer | null = null
 let captionLine = ''
 let captionSince = 0
 
-// Whether `/clawd hide` is on, and whether animation was asked for: the clock runs only for a band
-// someone can see. Module state, set again by session.start and the sync after a reload.
-let isHidden = false
-let isAnimWanted = false
+// The view in force. Module state, set again by session.start and the sync after a reload.
+let view: View = 'mini'
+// Whether any screen is attached to the session, and when the animated band was last drawn: frames
+// are only worth bumping for a band someone can see. A session sent to the background stops being
+// drawn, so its animation idles until it is drawn again, whatever the engine reports about screens.
+let hasScreen = true
+let lastDrawnAt = Number.NEGATIVE_INFINITY
 
-function setAnimation($: Engine, isOn: boolean) {
-  isAnimWanted = isOn
+/** Starts or stops the animation clock: it runs in the full view, while a screen is attached. */
+function runClock($: Engine) {
   clock?.cancel()
-  clock = isOn && !isHidden ? $.clock.every(FRAME_MS, () => void update($, frameRef, n => (n ?? 0) + 1)) : null
+  clock =
+    view === 'show' && hasScreen
+      ? $.clock.every(FRAME_MS, () => {
+          void (async () => {
+            if ((await $.clock.now()) - lastDrawnAt > IDLE_MS) return
+            await update($, frameRef, n => (n ?? 0) + 1)
+          })()
+        })
+      : null
 }
+
+/** A screen joined or left: re-read the screens and start or stop the clock to match. */
+async function screensChanged($: Engine) {
+  hasScreen = await readScreens($)
+  runClock($)
+}
+
+/** Reads whether the session draws on any screen; where that cannot be told, assume it does. */
+const readScreens = ($: Engine) => $.session.surfaces().then(
+  screens => screens.length > 0,
+  () => true,
+)
 
 /** A toast, unless the game is hidden. */
 function notify($: Engine, text: string) {
-  if (!isHidden) $.ui.toast(text)
+  if (view !== 'hide') $.ui.toast(text)
 }
 
-/** `/clawd hide` and `/clawd show`: every view of the game goes or comes back; the game runs on regardless. */
-async function setHidden($: Engine, hidden: boolean) {
-  isHidden = hidden
-  await $.state.set(hiddenRef, hidden)
-  if (hidden && (await $.ui.panes()).some(p => p.id === PANE)) await $.ui.close({ id: PANE })
-  setAnimation($, isAnimWanted)
+/** Puts a view in force: the animation clock runs only for the full view, and hiding closes the pane. */
+async function setView($: Engine, next: View) {
+  view = next
+  await $.state.set(viewRef, next)
+  runClock($)
+  if (next === 'hide' && (await $.ui.panes()).some(p => p.id === PANE)) await $.ui.close({ id: PANE })
+}
+
+const VIEW_SAID: Record<View, string> = {
+  show: 'Claude RPG full view: the status line and the animated band above your prompt.',
+  mini: 'Claude RPG mini view: just the status line above your prompt.',
+  hide: 'Claude RPG hidden: Clawd keeps adventuring out of sight. /rpg mini or /rpg show brings it back.',
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description: 'Claude RPG: toggle the character pane; `anim` toggles the animated band; `pixelart` switches it between pixel art and text art; `reset` starts a new hero',
-      argumentHint: '[anim | pixelart | reset]',
+      description: 'Claude RPG: toggle the character pane; `show` the full animated view, `mini` just the status line, `hide` nothing (it keeps playing); `reset` starts a new hero',
+      argumentHint: '[show | mini | hide | reset]',
     })
     // The status line is drawn above the prompt; clear any pinned one an older version left.
     $.ui.status(undefined)
     await serial(async () => $.state.set(saveRef, await load($)))
-    await $.command.register({ name: HIDE_COMMAND, description: 'Claude RPG: `hide` hides every view of the game (it keeps playing); `show` brings it back', argumentHint: '[hide | show]' })
-    isHidden = (await $.store.get(HIDE_KEY)) === true
-    await $.state.set(hiddenRef, isHidden)
-    const isAnimOn = (await $.store.get(ANIM_KEY)) === true
-    await $.state.set(animOnRef, isAnimOn)
-    await $.state.set(styleRef, await readStyle($))
-    setAnimation($, isAnimOn)
+    hasScreen = await readScreens($)
+    await setView($, await readView($))
     syncClock?.cancel()
     syncClock = $.clock.every(SYNC_MS, () => void serial(() => refresh($)).catch(() => undefined))
     return next(e)
   })
 
-  on('command.run', { command: HIDE_COMMAND }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
-    if (arg === 'hide') {
-      await $.store.set(HIDE_KEY, true)
-      await setHidden($, true)
-      return { text: 'Claude RPG hidden: Clawd keeps adventuring out of sight. /clawd show brings it back.' }
-    }
-    if (arg === 'show') {
-      await $.store.set(HIDE_KEY, false)
-      await setHidden($, false)
-      return { text: 'Claude RPG shown again.' }
-    }
-    return { text: `Claude RPG is ${isHidden ? 'hidden' : 'shown'}. /clawd hide hides every view of the game (it keeps playing); /clawd show brings it back.` }
-  }).catch(() => ({ text: 'Claude RPG: that did not work.' }))
+  // A screen joined or left: animate only while one is attached.
+  on('session.attach', async ($, e, next) => {
+    const done = await next(e)
+    await screensChanged($)
+    return done
+  })
+  on('session.detach', async ($, e, next) => {
+    const done = await next(e)
+    await screensChanged($)
+    return done
+  })
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
-    // While the game is hidden, asking for the band is asking to see it: show again, and land on the
-    // view asked for (animation on; pixel art) rather than toggling it away.
-    const isImplicitShow = isHidden && (arg === 'anim' || arg === 'pixelart')
-    if (isImplicitShow) {
-      await $.store.set(HIDE_KEY, false)
-      await setHidden($, false)
-    }
-    const shown = isImplicitShow ? 'Claude RPG shown again. ' : ''
-    if (arg === 'anim') {
-      const isOn = isImplicitShow || (await $.store.get(ANIM_KEY)) !== true
-      await $.store.set(ANIM_KEY, isOn)
-      await $.state.set(animOnRef, isOn)
-      setAnimation($, isOn)
-      return { text: shown + (isOn ? 'Claude RPG animation on: Clawd now adventures above your prompt.' : 'Claude RPG animation off.') }
-    }
-    if (arg === 'pixelart') {
-      const result = await toggleStyle($, isImplicitShow ? 'pixel' : undefined)
-      return { text: shown + result.text }
+    if (arg === 'show' || arg === 'mini' || arg === 'hide') {
+      if (arg === view) return { text: `${VIEW_SAID[arg]} (Already in that view.)` }
+      await $.store.set(VIEW_KEY, arg)
+      await setView($, arg)
+      return { text: VIEW_SAID[arg] }
     }
     if (arg === 'reset') {
       const s = await load($)
@@ -289,7 +271,7 @@ export const register: Register = on => {
     }
     if (arg !== '')
       return {
-        text: 'Usage: /rpg toggles the pane, /rpg anim toggles the animated band, /rpg pixelart switches it between pixel art and text art, /rpg reset starts a new hero.',
+        text: 'Usage: /rpg toggles the pane; /rpg show (full animated view), /rpg mini (just the status line) or /rpg hide (nothing; it keeps playing); /rpg reset starts a new hero.',
       }
     const panes = await $.ui.panes()
     if (panes.some(p => p.id === PANE)) {
@@ -328,28 +310,28 @@ export const register: Register = on => {
     return ran
   })
 
-  // The band above the prompt: Clawd's status line, with the animated scene under it when animation is on.
+  // The band above the prompt: nothing when hidden, Clawd's status line in the mini view, and the
+  // animated scene under it in the full view.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || e.props.maxRows < 1) return next(e)
-    const { value: hidden = false } = await $.state.get(hiddenRef)
-    if (hidden) return next(e)
+    const { value: shown = 'mini' } = await $.state.get(viewRef)
+    if (shown === 'hide') return next(e)
     const { value: save } = await $.state.get(saveRef)
     if (!save) return next(e)
     const { Box, Text } = $.ui.resolve(e)
     const status = <Text wrap="truncate-end">{statusLine(save)}</Text>
-    const { value: isAnimOn } = await $.state.get(animOnRef)
-    if (!isAnimOn || e.props.maxRows < SCENE_ROWS + 1) return status
+    if (shown === 'mini' || e.props.maxRows < SCENE_ROWS + 1) return status
 
+    // Drawn now: the clock may bump frames for the next IDLE_MS.
+    lastDrawnAt = await $.clock.now()
     const { value: frame = 0 } = await $.state.get(frameRef)
     const { value: burst = null } = await $.state.get(burstRef)
-    const { value: style = 'pixel' } = await $.state.get(styleRef)
-    const compose = style === 'pixel' ? composePixelScene : composeScene
     const line = save.log[save.log.length - 1]?.text ?? ''
     if (line !== captionLine) {
       captionLine = line
       captionSince = frame
     }
-    const rows = compose(save, frame, burst, e.props.bodyColumns, frame - captionSince)
+    const rows = composePixelScene(save, frame, burst, e.props.bodyColumns, frame - captionSince)
 
     return (
       <Box flexDirection="column">

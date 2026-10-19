@@ -4,25 +4,10 @@ import type { Save } from '../types'
 import { BIOMES } from './content'
 import { makeEnemy, newSave, tick } from './engine'
 import { composePixelScene } from './pixel'
-import { activeFx, archetypeOf, burstFx, composeScene, FX_FRAMES, MARQUEE_HOLD, marquee, pixels, SCENE_ROWS } from './scene'
+import { activeFx, archetypeOf, burstFx, FX_FRAMES, MARQUEE_HOLD, marquee, pixels } from './scene'
 
 const always = (value: number) => () => value
 const text = (rows: { text: string }[][]) => rows.map(r => r.map(s => s.text).join(''))
-
-test('every scene is six rows of exactly the band width', () => {
-  for (const biome of BIOMES) {
-    for (const def of [...biome.enemies, ...biome.bosses]) {
-      const base = newSave(always(0.5))
-      const isBoss = biome.bosses.includes(def as never)
-      const s: Save = { ...base, zone: { ...base.zone, biome: biome.id }, phase: 'fighting', enemy: makeEnemy(always(0.5), 5, def, isBoss ? 'boss' : 'normal') }
-      for (const width of [34, 60, 120]) {
-        const rows = text(composeScene(s, 3, { fx: ['crit', 'hurt'], at: 0, enemy: s.enemy }, width))
-        expect(rows.length).toBe(SCENE_ROWS)
-        for (const row of rows) expect([...row].length).toBe(Math.max(30, Math.min(width, 72)))
-      }
-    }
-  }
-})
 
 test('bosses get the large archetypes and the rest map by name', () => {
   expect(archetypeOf({ name: 'The White Wyrm', isBoss: true })).toBe('wyrm')
@@ -42,7 +27,7 @@ test('a burst plays its effects in order, then hands back to the idle loop', () 
 
 test('a level-up burst shouts it', () => {
   const s = newSave(always(0.5))
-  const rows = text(composeScene(s, 1, { fx: ['level'], at: 0, enemy: null }, 60))
+  const rows = text(composePixelScene(s, 1, { fx: ['level'], at: 0, enemy: null }, 60))
   expect(rows.some(r => r.includes('LEVEL UP!'))).toBe(true)
 })
 
@@ -52,49 +37,25 @@ test('the engine reports a fight exchange as hit then hurt', () => {
   expect(tick(s, always(0.5)).fx).toEqual(['hit', 'hurt'])
 })
 
-test('/rpg anim turns the band on and remembers it', async ($, on) => {
-  mock.store(on)
-  const seen: boolean[] = []
-  on('state.set', ($, e, next) => {
-    if (e.plugin === 'clawd-rpg' && e.key === 'animOn') seen.push(e.value as boolean)
-    return next(e)
-  })
-  const first = await $.command.run({ command: 'rpg', args: 'anim' } as Parameters<typeof $.command.run>[0])
-  const second = await $.command.run({ command: 'rpg', args: 'anim' } as Parameters<typeof $.command.run>[0])
-  expect(seen).toEqual([true, false])
-  expect(JSON.stringify(first)).toContain('animation on')
-  expect(JSON.stringify(second)).toContain('animation off')
-})
-
 for (const surface of ['terminal', 'desktop'] as const) {
-  test(`the band draws the scene on ${surface} once animation is on`, async ($, on) => {
+  test(`the band draws the pixel-art scene on ${surface} in the full view`, async ($, on) => {
     mock.store(on)
     mock.clock(on)
     on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }) as never)
-    await $.command.run({ command: 'rpg', args: 'anim' } as Parameters<typeof $.command.run>[0])
+    await $.command.run({ command: 'rpg', args: 'show' } as Parameters<typeof $.command.run>[0])
     await $.tool.call({ tool: 'Bash', command: 'true' })
     const props = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 60, scroll: { offset: 0, bodyRows: 19 } }
     const band = await $.ui.mount({ plugin: 'clawd-rpg', surface, component: 'AbovePrompt', props: props as never })
     expect((await band.findAll({ type: 'Text', text: /Lv1/ })).length > 0).toBe(true)
+    const picture = (await band.findAll({ type: 'Text' })).map(t => t.text).join('')
+    expect([...picture].some(ch => '▘▝▖▗▌▐▚▞▛▜▙▟'.includes(ch))).toBe(true)
     await band.unmount()
   })
 }
 
-test('pixel sprites turn each 2×2 block of pixels into its quarter-block character', () => {
+test('quarter-block glyph art is built from pixels, each 2×2 block one character', () => {
   expect(pixels(['#.##..', '..##.#', '#...##', '##..##', '......', '####..'])).toEqual(['▘█▗', '▙ █', '▄▄ '])
   expect(() => pixels(['###', '...', '...', '...', '...', '...'])).toThrow()
-})
-
-test('enemies are coloured only along their bodies, like Clawd: nothing paints outside the row\'s own fill', () => {
-  const base = newSave(always(0.5))
-  for (const biome of BIOMES) {
-    const s: Save = { ...base, zone: { ...base.zone, biome: biome.id }, phase: 'fighting', enemy: makeEnemy(always(0.5), 3, biome.bosses[0]!, 'boss') }
-    const rows = composeScene(s, 0, null, 60)
-    for (const row of rows.slice(0, 5)) {
-      const fills = new Set(row.map(seg => seg.bg))
-      expect(fills.size).toBe(1)
-    }
-  }
 })
 
 test('a caption that fits stands still; a long one shows its start, slides along, holds its end, and starts over', () => {
@@ -112,14 +73,12 @@ test('a caption that fits stands still; a long one shows its start, slides along
   for (let age = 0; age < 200; age++) expect([...marquee(text, room, age)].length).toBe(room)
 })
 
-test('the band caption scrolls a long line in every art style, keeping the band its exact width', () => {
+test('the band caption scrolls a long line, keeping the band its exact width', () => {
   const long = 'A half-sunk house leans in the reeds like a tired drunk, and something in the water hums back at you.'
   const s: Save = { ...newSave(always(0.5)), log: [{ kind: 'info', text: long }] }
-  for (const compose of [composeScene, composePixelScene]) {
-    const caption = (age: number) => compose(s, 0, null, 60, age)[5]!.map(seg => seg.text).join('')
-    expect(caption(0).includes('A half-sunk house')).toBe(true)
-    expect(caption(0) === caption(MARQUEE_HOLD + 15)).toBe(false)
-    expect(caption(MARQUEE_HOLD + 200).length > 0).toBe(true)
-    for (const age of [0, 9, 40, 90]) expect([...caption(age)].length).toBe(60)
-  }
+  const caption = (age: number) => composePixelScene(s, 0, null, 60, age)[5]!.map(seg => seg.text).join('')
+  expect(caption(0).includes('A half-sunk house')).toBe(true)
+  expect(caption(0) === caption(MARQUEE_HOLD + 15)).toBe(false)
+  expect(caption(MARQUEE_HOLD + 200).length > 0).toBe(true)
+  for (const age of [0, 9, 40, 90]) expect([...caption(age)].length).toBe(60)
 })

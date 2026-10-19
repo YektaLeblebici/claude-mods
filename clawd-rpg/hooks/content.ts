@@ -359,20 +359,20 @@ export type PetBonus = 'potion' | 'xp' | 'crit' | 'atk' | 'def' | 'gold' | 'find
  * Companions: one follows Clawd at a time. Each bonus is deliberately tiny, and grows by half its
  * base per level past the first (a duplicate find is a level, up to PET_MAX_LEVEL).
  */
-export const PETS: Record<PetId, { name: string; bonus: PetBonus; base: number; unit: string; art: [string, string]; color: string }> = {
-  slime: { name: 'Slime', bonus: 'potion', base: 5, unit: '% potion healing', art: [' .-. ', '(o.o)'], color: '#7cd36b' },
-  duck: { name: 'Rubber Duck', bonus: 'xp', base: 3, unit: '% XP', art: [' __  ', '( o)>'], color: '#ffd23f' },
-  bat: { name: 'Bat', bonus: 'crit', base: 2, unit: '% crit', art: ['\\(oo)/', '  ^^  '], color: '#9c8ade' },
-  dragon: { name: 'Tiny Dragon', bonus: 'atk', base: 1, unit: ' ATK', art: [' _/\\ ', '(o_o)~'], color: '#ff6f4f' },
-  turtle: { name: 'Pebble Turtle', bonus: 'def', base: 1, unit: ' DEF', art: ['  ___ ', '(o)__)'], color: '#5fb38a' },
-  cat: { name: 'Lucky Cat', bonus: 'gold', base: 3, unit: '% gold', art: ['/\\_/\\', '(^.^)'], color: '#f0a8c8' },
-  owl: { name: 'Owl', bonus: 'find', base: 1, unit: '% item find', art: ['(o,o)', '/)_) '], color: '#c69c6d' },
-  wisp: { name: 'Wisp', bonus: 'hp', base: 2, unit: '% max HP', art: ['  *  ', ' (o) '], color: '#8fe3ff' },
+export const PETS: Record<PetId, { name: string; bonus: PetBonus; base: number; unit: string; color: string }> = {
+  slime: { name: 'Slime', bonus: 'potion', base: 5, unit: '% potion healing', color: '#7cd36b' },
+  duck: { name: 'Rubber Duck', bonus: 'xp', base: 3, unit: '% XP', color: '#ffd23f' },
+  bat: { name: 'Bat', bonus: 'crit', base: 2, unit: '% crit', color: '#9c8ade' },
+  dragon: { name: 'Tiny Dragon', bonus: 'atk', base: 1, unit: ' ATK', color: '#ff6f4f' },
+  turtle: { name: 'Pebble Turtle', bonus: 'def', base: 1, unit: ' DEF', color: '#5fb38a' },
+  cat: { name: 'Lucky Cat', bonus: 'gold', base: 3, unit: '% gold', color: '#f0a8c8' },
+  owl: { name: 'Owl', bonus: 'find', base: 1, unit: '% item find', color: '#c69c6d' },
+  wisp: { name: 'Wisp', bonus: 'hp', base: 2, unit: '% max HP', color: '#8fe3ff' },
   // Wild characters: never dropped at random, only won by beating them (see LEGENDS).
-  tim: { name: 'Tim Apple', bonus: 'gold', base: 3, unit: '% gold', art: [' o  ', '/|\\@'], color: '#78909c' },
-  tarbolts: { name: 'Linux Tarbolts', bonus: 'crit', base: 2, unit: '% crit', art: [' o  ', '/|\\Q'], color: '#8d6e63' },
-  freeman: { name: 'Gordon Freeman', bonus: 'def', base: 1, unit: ' DEF', art: [' o /', '/|\\ '], color: '#ff8f00' },
-  sam: { name: 'Sam Altermann', bonus: 'xp', base: 3, unit: '% XP', art: [' o  ', '/|\\o'], color: '#7fa7c9' },
+  tim: { name: 'Tim Apple', bonus: 'gold', base: 3, unit: '% gold', color: '#78909c' },
+  tarbolts: { name: 'Linux Tarbolts', bonus: 'crit', base: 2, unit: '% crit', color: '#8d6e63' },
+  freeman: { name: 'Gordon Freeman', bonus: 'def', base: 1, unit: ' DEF', color: '#ff8f00' },
+  sam: { name: 'Sam Altermann', bonus: 'xp', base: 3, unit: '% XP', color: '#7fa7c9' },
 }
 export const PET_MAX_LEVEL = 5
 

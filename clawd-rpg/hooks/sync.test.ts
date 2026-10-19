@@ -93,7 +93,7 @@ test('a save another session wrote shows here within one sync', async ($, on) =>
   await band.unmount()
 })
 
-test('animation turned on in another session starts here within one sync, and its frames advance', async ($, on) => {
+test('the full view chosen in another session starts here within one sync, and its frames advance', async ($, on) => {
   const clock = mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
   diskStore(on, disk)
@@ -104,9 +104,13 @@ test('animation turned on in another session starts here within one sync, and it
   })
   engineStart(on)
   await $.session.start(START)
-  disk.anim = true
+  disk.view = 'show'
   await clock.advance(3100)
+  // The band is drawn, so the clock has someone to animate for.
+  const props = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 60, scroll: { offset: 0, bodyRows: 19 } }
+  const band = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: props as never })
   await clock.advance(1000)
+  await band.unmount()
   expect(frames.length >= 2).toBe(true)
   expect(frames[frames.length - 1]! > frames[0]!).toBe(true)
 })

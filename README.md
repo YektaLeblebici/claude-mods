@@ -15,12 +15,12 @@ you work. Each prompt and each Claude response is a game tick. A successful Bash
 next tick lucky, a failed one leaves an omen of bad luck, and a `git commit` opens a treasure chest.
 
 - `/rpg` opens the character pane (gear, pets, log, achievements; pick a pet there)
-- `/rpg anim` shows the animated band above the prompt, in pixel art by default
-- `/rpg pixelart` switches the band between pixel art and text art
+- `/rpg show` shows the full view: the status line and the animated pixel-art band above the prompt
+- `/rpg mini` shows just the status line (the default until you choose)
+- `/rpg hide` hides everything, toasts and the pane too, while Clawd keeps playing
 - `/rpg reset confirm` starts a new hero after `/rpg reset` (backed up; `/rpg reset undo`)
-- `/clawd hide` hides every view of the game (the line above the prompt, the band, toasts, the pane) while Clawd keeps playing; `/clawd show` brings it back, and so do `/rpg anim` and `/rpg pixelart`
 
-The status line above the prompt shows Clawd's title, level, XP, HP and zone. The save is shared
+The status line shows Clawd's title, level, XP, HP and zone. Your last choice of view is kept. The save is shared
 by every session on the machine. The mod reads only whether a Bash command succeeded and whether
 it was a `git commit`; command text is never stored.
 

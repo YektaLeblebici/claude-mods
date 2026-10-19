@@ -53,6 +53,9 @@ export type QuarterLook = {
   /** The two ground rows (8–9). */
   ground: Stamp
   props: Stamp[]
+  /** The colours this biome's enemies and bosses take. */
+  foe: string
+  boss: string
 }
 
 // ── Shared pieces ────────────────────────────────────────────────────
@@ -65,6 +68,8 @@ const DOT: Grid = ['x']
 
 export const QUARTER_LOOKS: Record<string, QuarterLook> = {
   meadow: {
+    foe: '#5d2e0f',
+    boss: '#3e1f0a',
     sky: ['#3a74bd', '#5b93d4', '#82b3e6', '#b0d4f2'],
     skyArt: {
       grid: strip(96, 6, [[30, 0, SUN], [52, 0, CLOUD_BIG], [76, 1, CLOUD_SMALL], [4, 0, CLOUD_SMALL]]),
@@ -81,6 +86,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   caves: {
+    foe: '#9ccc65',
+    boss: '#c5e1a5',
     sky: ['#0f0b0a', '#16110f', '#1e1814', '#2a221e'],
     skyArt: {
       grid: strip(60, 4, [
@@ -101,6 +108,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   woods: {
+    foe: '#d1b3ff',
+    boss: '#f48fb1',
     sky: ['#1f1a33', '#2a2340', '#3b3152', '#4e4266'],
     skyArt: {
       grid: strip(84, 6, [[14, 0, MOON], [4, 1, DOT], [30, 0, DOT], [44, 3, DOT], [58, 1, DOT], [70, 4, DOT], [78, 0, DOT], [38, 1, DOT]]),
@@ -117,6 +126,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   swamp: {
+    foe: '#dce775',
+    boss: '#fff176',
     sky: ['#2c3825', '#3a4730', '#4f5f3c', '#6b7a52'],
     skyArt: {
       grid: strip(64, 5, [[3, 1, DOT], [15, 3, DOT], [24, 0, DOT], [33, 4, DOT], [41, 2, DOT], [52, 1, DOT], [60, 3, DOT]]),
@@ -132,6 +143,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   desert: {
+    foe: '#7f1d0a',
+    boss: '#4a0e05',
     sky: ['#d9792f', '#e8913f', '#f2ac5c', '#f7cd8a'],
     skyArt: { grid: strip(90, 6, [[38, 0, SUN]]), palette: { s: '#fff3c4' } },
     far: { points: [2, 3, 4, 3, 2, 2, 3, 5, 4, 2], spacing: 12, shape: 'smooth', color: '#d39548' },
@@ -145,6 +158,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   frost: {
+    foe: '#0d47a1',
+    boss: '#1a237e',
     sky: ['#6f9ccc', '#8db2d9', '#b0cbe6', '#d5e5f4'],
     skyArt: {
       grid: strip(72, 4, [
@@ -164,6 +179,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   volcano: {
+    foe: '#ffab91',
+    boss: '#ffeb3b',
     sky: ['#1f0d0b', '#2e1310', '#4a1c14', '#7a2e1a'],
     skyArt: {
       grid: strip(60, 5, [[2, 1, DOT], [9, 4, ['y']], [17, 0, DOT], [26, 3, DOT], [34, 1, ['y']], [43, 4, DOT], [51, 2, DOT], [57, 0, ['y']]]),
@@ -179,6 +196,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   crypt: {
+    foe: '#b9f6ca',
+    boss: '#69f0ae',
     sky: ['#101014', '#16161b', '#1d1d23', '#24242c'],
     skyArt: {
       grid: strip(48, 4, [[0, 0, ['gggg.gggggg.gggg.ggggg.gggggg.gggg.ggggg.gggggg.', 'g..g.g....g.g..g.g...g.g....g.g..g.g...g.g....g.']], [10, 2, ['c', 'c']], [34, 2, ['c', 'c']]]),
@@ -194,6 +213,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   sky: {
+    foe: '#4a148c',
+    boss: '#b71c1c',
     sky: ['#2a66b8', '#4a86cc', '#76a8e0', '#a8cdf2'],
     skyArt: { grid: strip(100, 4, [[8, 0, CLOUD_BIG], [40, 1, CLOUD_SMALL], [62, 0, CLOUD_BIG], [88, 1, CLOUD_SMALL]]), palette: { w: '#ffffff' } },
     far: { points: [2, 3, 4, 3, 2, 3, 5, 4, 2], spacing: 9, shape: 'smooth', color: '#eef6ff' },
@@ -206,6 +227,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   sunken: {
+    foe: '#ffcc80',
+    boss: '#ff8a65',
     sky: ['#041c2b', '#072a40', '#0b3d57', '#0f5470'],
     skyArt: {
       grid: strip(56, 5, [[4, 3, DOT], [6, 1, DOT], [18, 4, ['o']], [20, 2, DOT], [31, 0, DOT], [40, 3, ['o']], [47, 1, DOT], [52, 4, DOT]]),
@@ -221,6 +244,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   clockwork: {
+    foe: '#80deea',
+    boss: '#ff5252',
     sky: ['#1c1511', '#241b16', '#33271f', '#4a3a2e'],
     skyArt: {
       grid: strip(40, 4, [[0, 0, ['pppppppppppppppppppppppppppppppppppppppp', '..p...........p..........p..........p...']], [2, 2, ['p', 'v']], [14, 2, ['p']], [25, 2, ['p', 'v']], [36, 2, ['p']]]),
@@ -235,6 +260,8 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
     ],
   },
   void: {
+    foe: '#f8bbd0',
+    boss: '#ff80ab',
     sky: ['#030208', '#07040f', '#0e081c', '#160b28'],
     skyArt: {
       grid: strip(80, 5, [

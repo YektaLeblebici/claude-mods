@@ -17,7 +17,6 @@ import {
   tick,
 } from './engine'
 import { composePixelScene } from './pixel'
-import { composeScene } from './scene'
 
 const always = (value: number) => () => value
 const item = (over: Partial<Item>): Item => ({ name: 'Longsword', slot: 'weapon', rarity: 'rare', power: 14, affixes: [], score: 14, ...over })
@@ -115,10 +114,11 @@ test('pet bonuses are tiny and only the active pet counts', () => {
 test('the active pet follows Clawd in the scene and leaves the band its full width', () => {
   const s = newSave(always(0.5))
   gainPet(s, 'turtle', [], [])
+  const turtle = (rows: { color?: string; bg?: string }[][]) => rows.slice(0, 5).some(r => r.some(seg => seg.color === '#5fb38a' || seg.bg === '#5fb38a'))
   for (const width of [34, 72]) {
-    const rows = composeScene(s, 1, { fx: ['chest'], at: 0, enemy: null }, width).map(r => r.map(seg => seg.text).join(''))
-    expect(rows.some(r => r.includes('(o)__)'))).toBe(true)
-    for (const row of rows) expect([...row].length).toBe(Math.max(30, Math.min(width, 72)))
+    const rows = composePixelScene(s, 1, { fx: ['chest'], at: 0, enemy: null }, width)
+    expect(turtle(rows)).toBe(true)
+    for (const row of rows) expect([...row.map(seg => seg.text).join('')].length).toBe(Math.max(30, Math.min(width, 72)))
   }
 })
 
@@ -220,7 +220,7 @@ test('every biome still draws with a pet along', () => {
   for (const biome of BIOMES) {
     const s = { ...newSave(always(0.5)), zone: { ...newSave(always(0.5)).zone, biome: biome.id } }
     gainPet(s, 'owl', [], [])
-    expect(composeScene(s, 3, null, 60).length).toBe(6)
+    expect(composePixelScene(s, 3, null, 60).length).toBe(6)
   }
 })
 
@@ -246,24 +246,29 @@ test('a chest opened mid-fight only flashes by', () => {
 
 test('a chest left on the road is drawn once, standing still while the road scrolls, and never in combat', () => {
   const opened = { ...openChest(newSave(always(0.5)), 0, always(0.5)).save, phase: 'exploring' as const }
-  // Text art: the chest is the one `[_[]_]` on screen, in the same place every frame.
-  const spots = new Set<number>()
+  // The chest's gold (#ffb300) is the only gold in any biome: where it shows is where the chest stands.
+  const goldCells = (rows: { text: string; color?: string; bg?: string }[][]) => {
+    const cells: string[] = []
+    rows.slice(0, 5).forEach((row, r) => {
+      let col = 0
+      for (const seg of row) {
+        const len = [...seg.text].length
+        if (seg.color === '#ffb300' || seg.bg === '#ffb300') for (let i = 0; i < len; i++) cells.push(`${r}:${col + i}`)
+        col += len
+      }
+    })
+    return cells.join(',')
+  }
+  const spots = new Set<string>()
   for (let frame = 0; frame < 12; frame++) {
-    const rows = composeScene(opened, frame, null, 64).map(r => r.map(seg => seg.text).join(''))
-    const hits = rows.filter(r => r.includes('[_[]_]'))
-    expect(hits.length).toBe(1)
-    spots.add(hits[0]!.indexOf('[_[]_]'))
+    const cells = goldCells(composePixelScene(opened, frame, null, 64))
+    expect(cells.length > 0).toBe(true)
+    spots.add(cells)
   }
+  // Standing still: the same cells every frame, while the road scrolls underneath.
   expect(spots.size).toBe(1)
-  // Pixel art: the chest's gold shows, and only while on the road.
-  const gold = (rows: { color?: string; bg?: string }[][]) => rows.slice(0, 5).some(r => r.some(seg => seg.color === '#ffb300' || seg.bg === '#ffb300'))
-  for (const compose of [composePixelScene]) {
-    for (let frame = 0; frame < 6; frame++) expect(gold(compose(opened, frame, null, 64))).toBe(true)
-    const fight: Save = { ...opened, phase: 'fighting', enemy: makeEnemy(always(0.5), 1, BIOMES[0]!.enemies[0]!, 'normal') }
-    expect(gold(compose(fight, 0, null, 64))).toBe(false)
-  }
   const fight: Save = { ...opened, phase: 'fighting', enemy: makeEnemy(always(0.5), 1, BIOMES[0]!.enemies[0]!, 'normal') }
-  expect(composeScene(fight, 0, null, 64).some(r => r.map(seg => seg.text).join('').includes('[_[]_]'))).toBe(false)
+  expect(goldCells(composePixelScene(fight, 0, null, 64))).toBe('')
 })
 
 test('no biome\'s scenery draws a chest any more, so the only chest on screen is a real one', () => {
@@ -271,9 +276,7 @@ test('no biome\'s scenery draws a chest any more, so the only chest on screen is
   for (const biome of BIOMES) {
     const s: Save = { ...base, zone: { ...base.zone, biome: biome.id } }
     for (let frame = 0; frame < 30; frame += 3) {
-      expect(composeScene(s, frame, null, 72).some(r => r.map(seg => seg.text).join('').includes('$'))).toBe(false)
-      for (const compose of [composePixelScene])
-        expect(compose(s, frame, null, 72).slice(0, 5).some(r => r.some(seg => seg.color === '#ffb300' || seg.bg === '#ffb300'))).toBe(false)
+      expect(composePixelScene(s, frame, null, 72).slice(0, 5).some(r => r.some(seg => seg.color === '#ffb300' || seg.bg === '#ffb300'))).toBe(false)
     }
   }
 })

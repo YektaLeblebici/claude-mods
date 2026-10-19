@@ -109,14 +109,14 @@ export type Save = {
   stats: Stats
 }
 
-/** How the animated band is drawn: pixel art (the default) or text art. */
-export type ArtStyle = 'ascii' | 'pixel'
+/** How much of the game shows: the full animated view, the status line alone, or nothing. */
+export type View = 'show' | 'mini' | 'hide'
 
 /** What the band is playing after a tick: its effects in order, from `at` (a frame), against `enemy`. */
 export type Burst = { fx: Fx[]; at: number; enemy: Enemy | null }
 
 declare module 'claude-code' {
   interface PluginState {
-    'clawd-rpg': { save: Save; animOn: boolean; frame: number; burst: Burst | null; style: ArtStyle; hidden: boolean }
+    'clawd-rpg': { save: Save; view: View; frame: number; burst: Burst | null }
   }
 }
