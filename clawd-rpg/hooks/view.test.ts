@@ -276,7 +276,7 @@ test('a plain /rpg <view> in a session with its own view sets the default and dr
   expect(await band($)).toBe('full')
 })
 
-test('the pane says whose view is in force', async ($, on) => {
+test('the pane does not show the view', async ($, on) => {
   mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
   engine(on, disk)
@@ -287,9 +287,9 @@ test('the pane says whose view is in force', async ($, on) => {
     await mounted.unmount()
     return text
   }
-  expect(await pane()).toContain('default for every session')
+  expect(await pane()).not.toContain('View:')
   await run($, 'rpg', 'show here')
-  expect(await pane()).toContain('this session only')
+  expect(await pane()).not.toContain('View:')
 })
 
 test('there is no /rpg follow: it shows the usage', async ($, on) => {

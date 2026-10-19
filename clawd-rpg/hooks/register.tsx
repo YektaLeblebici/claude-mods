@@ -374,8 +374,6 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { value: inForce = 'mini' } = await $.state.get(viewRef)
-    const { value: own = null } = await $.state.get(viewHereRef)
     const { Box, Button, Text } = $.ui.resolve(e)
     const { value: s } = await $.state.get(saveRef)
     if (!s) return <Text dimColor>Clawd is lacing up their boots…</Text>
@@ -403,10 +401,6 @@ export const register: Register = on => {
       <Box flexDirection="column">
         <Text bold>
           {heroName(s)} · Level {s.hero.level}
-        </Text>
-        <Text dimColor>
-          View: {inForce}
-          {own ? ' (this session only)' : ' (default for every session)'}
         </Text>
         <Text>
           XP {bar(s.hero.xp, xpToNext(s.hero.level), 14)} {s.hero.xp}/{xpToNext(s.hero.level)}
