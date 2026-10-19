@@ -235,3 +235,69 @@ test('with no screen attached the clock stops; a screen attaching starts it, the
   expect(frames.length).toBe(attached)
   await mounted.unmount()
 })
+
+test('/rpg show here gives this session the full view without touching the default for every session', async ($, on) => {
+  const clock = mock.clock(on)
+  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 }, view: 'mini' }
+  engine(on, disk)
+  await $.session.start(START)
+  expect((await run($, 'rpg', 'show here')).text).toContain('This session only')
+  expect(disk.view).toBe('mini')
+  expect(await band($)).toBe('full')
+
+  // Another session changes the default: this one keeps its own view through the sync.
+  disk.view = 'hide'
+  await clock.advance(3100)
+  expect(await band($)).toBe('full')
+
+  // A reload of the mod keeps it too: the override is session state.
+  await $.session.start(START)
+  expect(await band($)).toBe('full')
+
+  // A plain /rpg <view> hands the session back to the shared default.
+  await run($, 'rpg', 'hide')
+  expect(disk.view).toBe('hide')
+  expect(await band($)).toBe('nothing')
+})
+
+test('a plain /rpg <view> in a session with its own view sets the default and drops the override', async ($, on) => {
+  const clock = mock.clock(on)
+  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
+  engine(on, disk)
+  await $.session.start(START)
+  await run($, 'rpg', 'hide here')
+  expect(await band($)).toBe('nothing')
+  expect((await run($, 'rpg', 'mini')).text).toContain('default for every session')
+  expect(disk.view).toBe('mini')
+  expect(await band($)).toBe('status line')
+  // Following the default again: a change elsewhere reaches it.
+  disk.view = 'show'
+  await clock.advance(3100)
+  expect(await band($)).toBe('full')
+})
+
+test('the pane says whose view is in force', async ($, on) => {
+  mock.clock(on)
+  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
+  engine(on, disk)
+  await $.session.start(START)
+  const pane = async () => {
+    const mounted = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'Pane', requestId: 'clawd-rpg', props: {} as never })
+    const text = (await mounted.findAll({ type: 'Text' })).map(t => t.text).join(' ')
+    await mounted.unmount()
+    return text
+  }
+  expect(await pane()).toContain('default for every session')
+  await run($, 'rpg', 'show here')
+  expect(await pane()).toContain('this session only')
+})
+
+test('there is no /rpg follow: it shows the usage', async ($, on) => {
+  mock.clock(on)
+  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
+  engine(on, disk)
+  await $.session.start(START)
+  await run($, 'rpg', 'show here')
+  expect((await run($, 'rpg', 'follow')).text).toContain('Usage')
+  expect(await band($)).toBe('full')
+})

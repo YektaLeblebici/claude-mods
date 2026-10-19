@@ -35,6 +35,8 @@ const SYNC_MS = 3000
 const IDLE_MS = 2000
 const saveRef = { plugin: 'clawd-rpg', key: 'save' } as const
 const viewRef = { plugin: 'clawd-rpg', key: 'view' } as const
+/** This session's own view, set with `/rpg <view> here`: session state, so it outlives a reload but not the session. */
+const viewHereRef = { plugin: 'clawd-rpg', key: 'viewHere' } as const
 const frameRef = { plugin: 'clawd-rpg', key: 'frame' } as const
 const burstRef = { plugin: 'clawd-rpg', key: 'burst' } as const
 
@@ -131,8 +133,9 @@ async function refresh($: Engine) {
     const { value: shown } = await $.state.get(saveRef)
     if (!shown || revOf(shown) !== revOf(stored)) await $.state.set(saveRef, stored)
   }
-  const chosen = await readView($)
-  if (chosen !== view) await setView($, chosen)
+  // A session with its own view keeps it, whatever the default becomes.
+  shared = await readView($)
+  if (viewHere === null && shared !== view) await setView($, shared)
 }
 
 // The animation clock: one frame every FRAME_MS while the full view is on.
@@ -148,6 +151,10 @@ let captionSince = 0
 
 // The view in force. Module state, set again by session.start and the sync after a reload.
 let view: View = 'mini'
+// The shared default (the last plain /rpg show|mini|hide, in every session) and this session's own
+// view, when it has one (/rpg <view> here). The view in force is this session's own, else the default.
+let shared: View = 'mini'
+let viewHere: View | null = null
 // Whether any screen is attached to the session, and when the animated band was last drawn: frames
 // are only worth bumping for a band someone can see. A session sent to the background stops being
 // drawn, so its animation idles until it is drawn again, whatever the engine reports about screens.
@@ -203,14 +210,16 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: COMMAND,
-      description: 'Claude RPG: toggle the character pane; `show` the full animated view, `mini` just the status line, `hide` nothing (it keeps playing); `reset` starts a new hero',
-      argumentHint: '[show | mini | hide | reset]',
+      description: 'Claude RPG: toggle the character pane; `show` the full animated view, `mini` just the status line, `hide` nothing (it keeps playing), for every session or, with `here`, this one; `reset` starts a new hero',
+      argumentHint: '[show | mini | hide] [here] | reset',
     })
     // The status line is drawn above the prompt; clear any pinned one an older version left.
     $.ui.status(undefined)
     await serial(async () => $.state.set(saveRef, await load($)))
     hasScreen = await readScreens($)
-    await setView($, await readView($))
+    shared = await readView($)
+    viewHere = (await $.state.get(viewHereRef)).value ?? null
+    await setView($, viewHere ?? shared)
     syncClock?.cancel()
     syncClock = $.clock.every(SYNC_MS, () => void serial(() => refresh($)).catch(() => undefined))
     return next(e)
@@ -230,11 +239,26 @@ export const register: Register = on => {
 
   on('command.run', { command: COMMAND }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
-    if (arg === 'show' || arg === 'mini' || arg === 'hide') {
-      if (arg === view) return { text: `${VIEW_SAID[arg]} (Already in that view.)` }
-      await $.store.set(VIEW_KEY, arg)
-      await setView($, arg)
-      return { text: VIEW_SAID[arg] }
+    // `/rpg <view>` sets the shared default, and this session follows it too (dropping any view of its
+    // own); `/rpg <view> here` gives this session alone its own view.
+    const [verb, scope] = arg.split(/\s+/)
+    if ((verb === 'show' || verb === 'mini' || verb === 'hide') && (scope === undefined || scope === 'here')) {
+      if (scope === 'here') {
+        if (viewHere === verb) return { text: `${VIEW_SAID[verb]} (Already this session's view.)` }
+        viewHere = verb
+        await $.state.set(viewHereRef, verb)
+        await setView($, verb)
+        return { text: `${VIEW_SAID[verb]} This session only; a plain /rpg ${shared} (or show, mini, hide) returns it to the shared default.` }
+      }
+      if (shared === verb && viewHere === null) return { text: `${VIEW_SAID[verb]} (Already in that view.)` }
+      shared = verb
+      await $.store.set(VIEW_KEY, verb)
+      if (viewHere !== null) {
+        viewHere = null
+        await $.state.set(viewHereRef, null)
+      }
+      await setView($, verb)
+      return { text: `${VIEW_SAID[verb]} (Now the default for every session.)` }
     }
     if (arg === 'reset') {
       const s = await load($)
@@ -271,7 +295,7 @@ export const register: Register = on => {
     }
     if (arg !== '')
       return {
-        text: 'Usage: /rpg toggles the pane; /rpg show (full animated view), /rpg mini (just the status line) or /rpg hide (nothing; it keeps playing); /rpg reset starts a new hero.',
+        text: 'Usage: /rpg toggles the pane; /rpg show (full animated view), /rpg mini (just the status line) or /rpg hide (nothing; it keeps playing) set the default for every session, and with `here` (/rpg show here) this session only; /rpg reset starts a new hero.',
       }
     const panes = await $.ui.panes()
     if (panes.some(p => p.id === PANE)) {
@@ -350,6 +374,8 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+    const { value: inForce = 'mini' } = await $.state.get(viewRef)
+    const { value: own = null } = await $.state.get(viewHereRef)
     const { Box, Button, Text } = $.ui.resolve(e)
     const { value: s } = await $.state.get(saveRef)
     if (!s) return <Text dimColor>Clawd is lacing up their boots…</Text>
@@ -377,6 +403,10 @@ export const register: Register = on => {
       <Box flexDirection="column">
         <Text bold>
           {heroName(s)} · Level {s.hero.level}
+        </Text>
+        <Text dimColor>
+          View: {inForce}
+          {own ? ' (this session only)' : ' (default for every session)'}
         </Text>
         <Text>
           XP {bar(s.hero.xp, xpToNext(s.hero.level), 14)} {s.hero.xp}/{xpToNext(s.hero.level)}

@@ -117,6 +117,6 @@ export type Burst = { fx: Fx[]; at: number; enemy: Enemy | null }
 
 declare module 'claude-code' {
   interface PluginState {
-    'clawd-rpg': { save: Save; view: View; frame: number; burst: Burst | null }
+    'clawd-rpg': { save: Save; view: View; viewHere: View | null; frame: number; burst: Burst | null }
   }
 }

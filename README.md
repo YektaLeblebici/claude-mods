@@ -18,6 +18,7 @@ next tick lucky, a failed one leaves an omen of bad luck, and a `git commit` ope
 - `/rpg show` shows the full view: the status line and the animated pixel-art band above the prompt
 - `/rpg mini` shows just the status line (the default until you choose)
 - `/rpg hide` hides everything, toasts and the pane too, while Clawd keeps playing
+- Add `here` for one session only: `/rpg show here` gives this session the full view while the others keep the default; a plain `/rpg show`, `mini` or `hide` there sets the default for every session and brings that session back to it
 - `/rpg reset confirm` starts a new hero after `/rpg reset` (backed up; `/rpg reset undo`)
 
 The status line shows Clawd's title, level, XP, HP and zone. Your last choice of view is kept. The save is shared
