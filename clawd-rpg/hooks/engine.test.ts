@@ -78,6 +78,7 @@ test('a long run stays consistent', () => {
 })
 
 test('a failed Bash call makes the next tick unlucky, without storing the command', async ($, on) => {
+  const clock = mock.clock(on)
   mock.store(on)
   let value: Save | undefined
   on('state.set', ($, e, next) => {
@@ -86,6 +87,7 @@ test('a failed Bash call makes the next tick unlucky, without storing the comman
   })
   on('tool.call', { tool: 'Bash' }, () => ({ isError: true as const, result: 'exit 1', text: 'Exit code 1' }))
   await $.tool.call({ tool: 'Bash', command: 'curl -H "Authorization: Bearer sk-secret"' })
+  await clock.settle()
   expect(value?.pendingLuck).toBe('unlucky')
   expect(JSON.stringify(value).includes('sk-secret')).toBe(false)
 })
@@ -115,9 +117,11 @@ test('the status line leads with a sword, then the hero', () => {
 })
 
 test('the line above the prompt shows the status line, animation off', async ($, on) => {
+  const clock = mock.clock(on)
   mock.store(on)
   on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }) as never)
   await $.tool.call({ tool: 'Bash', command: 'true' })
+  await clock.settle()
   const props = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 80, scroll: { offset: 0, bodyRows: 19 } }
   const band = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: props as never })
   const texts = await band.findAll({ type: 'Text' })

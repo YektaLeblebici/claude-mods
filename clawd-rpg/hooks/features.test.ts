@@ -151,22 +151,26 @@ test('commits through Bash open good, small, then good chests across the 30-minu
   engineBeneath(on, disk, { isError: false })
   await clock.set(1_000_000)
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "first"' })
+  await clock.settle()
   expect((disk.save as Save).log.some(l => l.text.includes('treasure chest'))).toBe(true)
   await clock.advance(10 * 60_000)
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "second"' })
+  await clock.settle()
   expect((disk.save as Save).log.some(l => l.text.includes('a small chest'))).toBe(true)
   await clock.advance(21 * 60_000)
   const goodBefore = (disk.save as Save).log.filter(l => l.text.includes('treasure chest')).length
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "third"' })
+  await clock.settle()
   expect((disk.save as Save).log.filter(l => l.text.includes('treasure chest')).length > goodBefore || (disk.save as Save).lastGoodChestAt === 1_000_000 + 31 * 60_000).toBe(true)
   expect(JSON.stringify(disk.save).includes('first')).toBe(false)
 })
 
 test('a failed commit opens nothing and makes the next tick unlucky', async ($, on) => {
-  mock.clock(on)
+  const clock = mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
   engineBeneath(on, disk, { isError: true })
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "nope"' })
+  await clock.settle()
   expect((disk.save as Save).pendingLuck).toBe('unlucky')
   expect((disk.save as Save).lastGoodChestAt).toBe(undefined)
 })

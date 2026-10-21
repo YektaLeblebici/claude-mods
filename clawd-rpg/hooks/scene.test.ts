@@ -40,10 +40,11 @@ test('the engine reports a fight exchange as hit then hurt', () => {
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`the band draws the pixel-art scene on ${surface} in the full view`, async ($, on) => {
     mock.store(on)
-    mock.clock(on)
+    const clock = mock.clock(on)
     on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }) as never)
     await $.command.run({ command: 'rpg', args: 'show' } as Parameters<typeof $.command.run>[0])
     await $.tool.call({ tool: 'Bash', command: 'true' })
+    await clock.settle()
     const props = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 60, scroll: { offset: 0, bodyRows: 19 } }
     const band = await $.ui.mount({ plugin: 'clawd-rpg', surface, component: 'AbovePrompt', props: props as never })
     expect((await band.findAll({ type: 'Text', text: /Lv1/ })).length > 0).toBe(true)

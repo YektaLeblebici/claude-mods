@@ -55,13 +55,15 @@ const BLOCKED_SAID: Record<Blocked, string> = {
 /**
  * How much of the game shows: `show` the status line and the animated band, `mini` the status line
  * alone, `hide` nothing (the game plays on). The last choice is kept; with none, `mini`. A store from
- * before views reads its old switches: hidden as `hide`, animation on as `show`, otherwise `mini`.
+ * before views reads its old switches (hidden as `hide`, animation on as `show`, otherwise `mini`)
+ * once, and keeps the answer as the view, so the sync reads one key from then on.
  */
 async function readView($: Engine): Promise<View> {
   const stored = await $.store.get(VIEW_KEY)
   if (stored === 'show' || stored === 'mini' || stored === 'hide') return stored
-  if ((await $.store.get('hidden')) === true) return 'hide'
-  return (await $.store.get('anim')) === true ? 'show' : 'mini'
+  const view: View = (await $.store.get('hidden')) === true ? 'hide' : (await $.store.get('anim')) === true ? 'show' : 'mini'
+  await $.store.set(VIEW_KEY, view)
+  return view
 }
 
 const RARITY_COLOR: Record<Rarity, string> = {
@@ -387,16 +389,17 @@ export const register: Register = on => {
     return { text: 'Claude RPG pane opened.' }
   }).catch(() => ({ text: 'Claude RPG: the pane could not be toggled.' }))
 
-  // A game failure must never hold up the prompt or the tool call it rides on,
-  // and never runs either twice: only the game's own work is guarded.
+  // The game never holds up the prompt, the reply or the tool call it rides on: its work starts and
+  // the event goes on at once (serial keeps the game's own steps in order), and a failure in it is
+  // swallowed, never failing or repeating the event.
   on('prompt.submit', async ($, e, next) => {
-    await advance($).catch(() => undefined)
+    void advance($).catch(() => undefined)
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined) await advance($).catch(() => undefined)
+    if (e.agentId === undefined) void advance($).catch(() => undefined)
     return done
   })
 
@@ -410,7 +413,7 @@ export const register: Register = on => {
       const work = !hasFailed && isCommit(e.command)
         ? commitChest($)
         : serial(() => mutate(storeIO($), current => ({ save: setLuck(current, hasFailed), extra: null })))
-      await work.catch(() => undefined)
+      void work.catch(() => undefined)
     }
     return ran
   })
@@ -486,6 +489,8 @@ export const register: Register = on => {
           : { text: 'Next tick is neutral', color: 'subtle' }
     const unlocked = ACHIEVEMENTS.filter(a => s.achievements.includes(a.id))
     const nextSkill = SKILLS.find(k => k.level > s.hero.level)
+    // A pet only a newer version knows is left out, from the count as from the list.
+    const pets = (s.hero.pets ?? []).filter(owned => owned.id in PETS)
     const heading = (text: string) => (
       <Text bold color="claude">
         {text}
@@ -556,12 +561,11 @@ export const register: Register = on => {
         )}
 
         <Text> </Text>
-        {heading(`Pets ${s.hero.pets?.length ?? 0}/${Object.keys(PETS).length}`)}
-        {(s.hero.pets ?? []).length === 0 ? (
+        {heading(`Pets ${pets.length}/${Object.keys(PETS).length}`)}
+        {pets.length === 0 ? (
           <Text dimColor>None yet.</Text>
         ) : (
-          // A pet only a newer version knows is left out rather than breaking the pane.
-          (s.hero.pets ?? []).filter(owned => owned.id in PETS).map((owned, i) => {
+          pets.map((owned, i) => {
             const pet = PETS[owned.id]
             const isActive = s.hero.activePet === owned.id
             const amount = pet.base * (1 + 0.5 * (owned.level - 1))

@@ -74,13 +74,14 @@ async function play($: Engine) {
 }
 
 test('a session meeting a save from a newer version pauses: it never plays, resets or writes it', async ($, on) => {
-  mock.clock(on)
+  const clock = mock.clock(on)
   const newer = { ...newSave(always(0.5)), version: 2, rev: 9, hero: { ...newSave(always(0.5)).hero, level: 30 }, shiny: true }
   const disk: Record<string, unknown> = { save: newer }
   engineBeneath(on, disk)
   await $.session.start(START)
   expect(await bandText($)).toContain('newer version')
   await play($)
+  await clock.settle()
   expect((await run($, '')).text).toContain('/reload-plugins')
   expect((await run($, 'reset')).text).toContain('Nothing was changed')
   expect((await run($, 'reset confirm')).text).toContain('Nothing was reset')
@@ -98,6 +99,7 @@ test('a save upgraded by another session mid-play pauses this one at its next wr
   const newer = { ...(disk.save as Save), version: 2, rev: 50 }
   disk.save = newer
   await play($)
+  await clock.settle()
   expect(disk.save).toBe(newer)
   expect(await bandText($)).toContain('newer version')
   disk.save = { ...newSave(always(0.5)), rev: 51 }
@@ -116,13 +118,14 @@ test('the sync alone notices a newer save, before this session writes anything',
 })
 
 test('an unreadable save is never written over by play; /rpg reset confirm keeps it aside and starts anew', async ($, on) => {
-  mock.clock(on)
+  const clock = mock.clock(on)
   const junk = { version: 1, hero: 'garbled' }
   const disk: Record<string, unknown> = { save: junk }
   engineBeneath(on, disk)
   await $.session.start(START)
   expect(await bandText($)).toContain("can't be read")
   await play($)
+  await clock.settle()
   expect(disk.save).toBe(junk)
   expect((await run($, 'reset')).text).toContain('save-unreadable')
   expect((await run($, 'reset confirm')).text).toContain('kept in the store under save-unreadable')
@@ -132,12 +135,13 @@ test('an unreadable save is never written over by play; /rpg reset confirm keeps
 })
 
 test('with nothing stored, a new hero still starts and is saved on the first write', async ($, on) => {
-  mock.clock(on)
+  const clock = mock.clock(on)
   const disk: Record<string, unknown> = {}
   engineBeneath(on, disk)
   await $.session.start(START)
   expect(await bandText($)).toContain('Clawd the Newbie')
   await play($)
+  await clock.settle()
   expect(readSave(disk.save).kind).toBe('ok')
 })
 

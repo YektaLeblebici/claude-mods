@@ -113,10 +113,11 @@ const BAND = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 60,
 const run = ($: { command: { run: (e: never) => Promise<unknown> } }, args: string) => $.command.run({ command: 'rpg', args } as never) as Promise<{ text?: string }>
 
 test('the band draws pixel art', async ($, on) => {
-  mock.clock(on)
+  const clock = mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
   engineBeneath(on, disk)
   await $.tool.call({ tool: 'Bash', command: 'true' })
+  await clock.settle()
   await run($, 'show')
   const band = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
   const picture = (await band.findAll({ type: 'Text' })).map(t => t.text).join('')

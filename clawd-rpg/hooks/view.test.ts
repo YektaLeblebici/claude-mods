@@ -107,13 +107,14 @@ test('a store from before views keeps what it showed: hidden stays hidden, anima
 })
 
 test('hidden, the game keeps playing: a commit still opens a chest and the save moves on, without a toast', async ($, on) => {
-  mock.clock(on)
+  const clock = mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
   const seen = engine(on, disk)
   await $.session.start(START)
   await run($, 'rpg', 'hide')
   const goldBefore = (disk.save as Save).hero.gold
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "work"' })
+  await clock.settle()
   const after = disk.save as Save
   expect(after.hero.gold > goldBefore).toBe(true)
   expect(after.lastGoodChestAt !== undefined).toBe(true)
@@ -124,6 +125,7 @@ test('hidden, the game keeps playing: a commit still opens a chest and the save 
   await run($, 'rpg', 'mini')
   disk.save = { ...(disk.save as Save), lastGoodChestAt: -1e12, rev: ((disk.save as Save).rev ?? 0) + 1 }
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "more work"' })
+  await clock.settle()
   expect(seen.toasts.some(t => t.includes('Treasure chest'))).toBe(true)
 })
 
@@ -168,7 +170,8 @@ test('the game has one command, /rpg, and /rpg anim is gone', async ($, on) => {
   await $.session.start(START)
   expect(seen.commands).toEqual(['rpg'])
   expect((await run($, 'rpg', 'anim')).text).toContain('Usage')
-  expect(disk.view).toBe(undefined)
+  // Nothing switched the animation on: the view is still the default, kept once at start.
+  expect(disk.view).toBe('mini')
 })
 
 /** Frames the animation clock bumps, as the test watches them. */
