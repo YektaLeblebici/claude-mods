@@ -18,7 +18,8 @@ A `UserPromptSubmit` command hook (`hooks/emoji_title.py`):
 3. **Picking the emoji:** a keyword table (24 emojis, 132 patterns, first match wins).
    Only when nothing matches does it ask Claude Haiku once, through a nested
    `claude -p --model haiku` with a one-line system prompt, no tools and no saved session
-   (~1,075 tokens, about $0.0002).
+   (~1,075 tokens, about $0.0002). It answers in 4–6 seconds, and that one prompt waits for it;
+   past 8 seconds the hook gives up and the session keeps its plain title.
 
 One attempt per session: if Haiku fails, the session keeps its plain title. Marker files
 live in `$XDG_STATE_HOME/claude-emoji-title` (default `~/.local/state/…`) and are pruned
@@ -43,7 +44,8 @@ tokens (~$0.004). Worst case, a Haiku call in every conversation: 107,500 tokens
 - The nested `claude -p` carries a guard variable so its own hook exits at once (no
   runaway chain of sessions), and the calling session's handles are removed from its
   environment so it cannot rename the session that started it.
-- Never blocks a prompt: any error exits 0 with no output.
+- Never fails a prompt: any error exits 0 with no output. The one Haiku call per session can
+  hold that prompt for a few seconds (8 at most).
 
 ## Limitations
 

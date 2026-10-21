@@ -109,7 +109,8 @@ def haiku_emoji(title):
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
-            timeout=20,
+            # Haiku answers in 4-6 s (measured); past 8 s the session keeps its plain title.
+            timeout=8,
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -122,8 +123,12 @@ def mark_done(session_id):
     (STATE_DIR / session_id).touch()
     cutoff = time.time() - STATE_MAX_AGE
     for old in STATE_DIR.iterdir():
-        if old.stat().st_mtime < cutoff:
-            old.unlink(missing_ok=True)
+        # Another session may prune the same marker at the same moment; that one is gone either way.
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def main():

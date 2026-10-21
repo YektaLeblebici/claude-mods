@@ -87,5 +87,29 @@ class EmojiTitleTest(unittest.TestCase):
         self.assertEqual((out.returncode, out.stdout), (0, ""))
 
 
+class MarkerPruneTest(unittest.TestCase):
+    def test_a_marker_another_session_prunes_first_does_not_stop_this_one(self):
+        import importlib.util, pathlib
+        spec = importlib.util.spec_from_file_location("emoji_title", HOOK)
+        hook = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(hook)
+        hook.STATE_DIR = Path(tempfile.mkdtemp())
+        (hook.STATE_DIR / "gone").touch()
+        real_stat = pathlib.Path.stat
+
+        def vanishing_stat(path, *args, **kwargs):
+            # Another session unlinks "gone" between listing the folder and reading its age.
+            if path.name == "gone":
+                raise FileNotFoundError(path)
+            return real_stat(path, *args, **kwargs)
+
+        pathlib.Path.stat = vanishing_stat
+        try:
+            hook.mark_done("s1")
+        finally:
+            pathlib.Path.stat = real_stat
+        self.assertTrue((hook.STATE_DIR / "s1").exists())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
