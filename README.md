@@ -39,10 +39,6 @@ Answer `y` to add the marketplace, then pick a scope (**user** puts it in every 
 - **Removing:** `claude plugin uninstall <mod>`, or switch it off in `/plugin`.
 - **Access:** the repository is private, so installing needs GitHub access to it.
 
-> [!TIP]
-> q and Claude RPG need a recent Claude Code. If they fail to load with
-> `Failed to load hooks … expected record`, run `claude update` and reload.
-
 ## q: a task queue
 
 Keep talking to Claude while it works. Type `/q <task>` and the task waits its turn: it is sent
