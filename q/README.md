@@ -43,12 +43,12 @@ Claude Code prompt:
 /plugin install q --marketplace YektaLeblebici/claude-mods
 ```
 
-From a local checkout added as the `local-mods` marketplace
+From a local checkout added as the `yekta-mods` marketplace
 (`claude plugin marketplace add ~/claude-mods`), the folder itself is what runs, so an
 edit takes effect with `/reload-plugins`:
 
 ```sh
-claude plugin install q@local-mods
+claude plugin install q@yekta-mods
 ```
 
 Or load it for one session while developing:

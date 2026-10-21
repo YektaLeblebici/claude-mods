@@ -34,8 +34,8 @@ At a Claude Code prompt, install the ones you want:
 Answer `y` to add the marketplace, then pick a scope (**user** puts it in every project). Run
 `/reload-plugins` and the mod is on.
 
-- **Updating:** `claude plugin marketplace update local-mods`, then
-  `claude plugin update <mod>@local-mods` and `/reload-plugins`.
+- **Updating:** `claude plugin marketplace update yekta-mods`, then
+  `claude plugin update <mod>@yekta-mods` and `/reload-plugins`.
 - **Removing:** `claude plugin uninstall <mod>`, or switch it off in `/plugin`.
 
 ## q: a task queue
@@ -212,7 +212,7 @@ them, add a local checkout as the marketplace; the folder itself then runs, and
 
 ```sh
 claude plugin marketplace add ~/claude-mods
-claude plugin install clawd-rpg@local-mods
+claude plugin install clawd-rpg@yekta-mods
 ```
 
 Tests:
