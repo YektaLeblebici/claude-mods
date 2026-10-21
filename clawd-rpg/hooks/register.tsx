@@ -1,14 +1,14 @@
 import { update } from 'claude-code'
 import type { EngineInterface as Engine, Register, Timer } from 'claude-code'
 
-import type { Burst, Enemy, Fx, LogKind, PetId, Rarity, Save, View } from '../types'
+import type { Blocked, Burst, Enemy, Fx, LogKind, PetId, Rarity, Save, View } from '../types'
 import { ACHIEVEMENTS, AFFIX_INFO, MODIFIERS, PETS, SKILLS } from './content'
 import {
   bar,
+  FORMAT,
   heroName,
   heroStats,
   isCommit,
-  isSave,
   itemLabel,
   newSave,
   nextLuck,
@@ -19,6 +19,7 @@ import {
   tick,
   xpToNext,
 } from './engine'
+import { readSave } from './format'
 import { composePixelScene } from './pixel'
 import { burstFx, SCENE_ROWS } from './scene'
 import { mutate, revOf, type SaveIO } from './sync'
@@ -28,6 +29,10 @@ const COMMAND = 'rpg'
 const SAVE_KEY = 'save'
 const VIEW_KEY = 'view'
 const BACKUP_KEY = 'save-backup'
+/** Where /rpg reset keeps a save this build could not read, rather than deleting it. */
+const UNREADABLE_KEY = 'save-unreadable'
+/** Where a save is kept as it was before this build first migrated it to FORMAT. */
+const BEFORE_MIGRATION_KEY = `save-before-format-${FORMAT}`
 const RESET_WINDOW_MS = 2 * 60 * 1000
 const FRAME_MS = 333
 const SYNC_MS = 3000
@@ -39,6 +44,13 @@ const viewRef = { plugin: 'clawd-rpg', key: 'view' } as const
 const viewHereRef = { plugin: 'clawd-rpg', key: 'viewHere' } as const
 const frameRef = { plugin: 'clawd-rpg', key: 'frame' } as const
 const burstRef = { plugin: 'clawd-rpg', key: 'burst' } as const
+/** Why this session cannot play the shared save, when it cannot: it then shows only BLOCKED_SAID. */
+const blockedRef = { plugin: 'clawd-rpg', key: 'blocked' } as const
+
+const BLOCKED_SAID: Record<Blocked, string> = {
+  newer: '⚔  Claude RPG is paused in this session: your save is from a newer version of the mod. Run /reload-plugins to carry on.',
+  unreadable: "⚔  Claude RPG is paused: the shared save can't be read. /rpg reset starts a new hero and keeps the old save aside.",
+}
 
 /**
  * How much of the game shows: `show` the status line and the animated band, `mini` the status line
@@ -77,20 +89,68 @@ const serial = <T,>(work: () => Promise<T>): Promise<T> => {
   return run
 }
 
-// $.store is the save shared by every session; $.state mirrors it for drawing.
+/** Thrown instead of reading or writing a save this session must not touch; the game's hooks swallow it. */
+class SaveBlockedError extends Error {
+  constructor(readonly why: Blocked) {
+    super(`Claude RPG save is ${why}`)
+  }
+}
+
+/** Records whether this session can play the shared save; the band and the pane redraw on a change. */
+async function setBlocked($: Engine, why: Blocked | null) {
+  const { value: was = null } = await $.state.get(blockedRef)
+  if (was !== why) await $.state.set(blockedRef, why)
+}
+
+// $.store is the save shared by every session; $.state mirrors it for drawing. A save from a newer
+// build, or one that cannot be read, is never played nor written over: the session pauses instead,
+// so an outdated session can never replace everyone's hero with a new one.
 async function load($: Engine): Promise<Save> {
   const stored = await $.store.get(SAVE_KEY)
-  return isSave(stored) ? stored : newSave(Math.random)
+  const read = readSave(stored)
+  await setBlocked($, read.kind === 'newer' || read.kind === 'unreadable' ? read.kind : null)
+  if (read.kind === 'empty') return newSave(Math.random)
+  if (read.kind !== 'ok') throw new SaveBlockedError(read.kind)
+  // Migrated up from an older format: keep the save as it was first, once.
+  if (read.from < FORMAT && (await $.store.get(BEFORE_MIGRATION_KEY)) === undefined) await $.store.set(BEFORE_MIGRATION_KEY, stored)
+  return read.save
 }
 
 const storeIO = ($: Engine): SaveIO => ({
   read: () => load($),
   peekRev: async () => revOf(await $.store.get(SAVE_KEY)),
   write: async save => {
+    // A newer session may have written since the read: check again right before writing.
+    const now = readSave(await $.store.get(SAVE_KEY))
+    if (now.kind === 'newer' || now.kind === 'unreadable') {
+      await setBlocked($, now.kind)
+      throw new SaveBlockedError(now.kind)
+    }
     await $.store.set(SAVE_KEY, save)
     await $.state.set(saveRef, save)
   },
 })
+
+/**
+ * Puts `save` in place of whatever is stored, readable or not, for /rpg reset and its undo; refused
+ * (null) when the stored save is from a newer build. Gives back what was stored, read.
+ */
+async function replaceSave($: Engine, save: Save, backupKey?: string) {
+  const stored = await $.store.get(SAVE_KEY)
+  const read = readSave(stored)
+  if (read.kind === 'newer') {
+    await setBlocked($, 'newer')
+    return null
+  }
+  // Back up first: if anything below fails, the old save is still recoverable.
+  if (read.kind === 'ok' && backupKey) await $.store.set(backupKey, read.save)
+  if (read.kind === 'unreadable') await $.store.set(UNREADABLE_KEY, stored)
+  const written: Save = { ...save, rev: revOf(stored) + 1 }
+  await $.store.set(SAVE_KEY, written)
+  await $.state.set(saveRef, written)
+  await setBlocked($, null)
+  return read
+}
 
 const advance = ($: Engine) =>
   serial(async () => {
@@ -124,14 +184,16 @@ const commitChest = ($: Engine) =>
   })
 
 const choosePet = ($: Engine, id: PetId) =>
-  serial(() => mutate(storeIO($), current => ({ save: setActivePet(current, id), extra: null })))
+  serial(() => mutate(storeIO($), current => ({ save: setActivePet(current, id), extra: null }))).catch(() => undefined)
 
 // Another session may have ticked or changed the view: pick both up from the store.
 async function refresh($: Engine) {
   const stored = await $.store.get(SAVE_KEY)
-  if (isSave(stored)) {
+  const read = readSave(stored)
+  await setBlocked($, read.kind === 'newer' || read.kind === 'unreadable' ? read.kind : null)
+  if (read.kind === 'ok') {
     const { value: shown } = await $.state.get(saveRef)
-    if (!shown || revOf(shown) !== revOf(stored)) await $.state.set(saveRef, stored)
+    if (!shown || revOf(shown) !== revOf(stored)) await $.state.set(saveRef, read.save)
   }
   // A session with its own view keeps it, whatever the default becomes.
   shared = await readView($)
@@ -200,6 +262,9 @@ async function setView($: Engine, next: View) {
   if (next === 'hide' && (await $.ui.panes()).some(p => p.id === PANE)) await $.ui.close({ id: PANE })
 }
 
+const NOT_FROM_HERE =
+  'Nothing was changed: your save is from a newer version of Claude RPG than this session runs, and writing it from here could undo that version\'s changes in every session. Run /reload-plugins, then try again.'
+
 const VIEW_SAID: Record<View, string> = {
   show: 'Claude RPG full view: the status line and the animated band above your prompt.',
   mini: 'Claude RPG mini view: just the status line above your prompt.',
@@ -215,7 +280,8 @@ export const register: Register = on => {
     })
     // The status line is drawn above the prompt; clear any pinned one an older version left.
     $.ui.status(undefined)
-    await serial(async () => $.state.set(saveRef, await load($)))
+    // A save this session cannot play leaves it paused, not failed: load has said why.
+    await serial(async () => $.state.set(saveRef, await load($))).catch(() => undefined)
     hasScreen = await readScreens($)
     shared = await readView($)
     viewHere = (await $.state.get(viewHereRef)).value ?? null
@@ -261,8 +327,17 @@ export const register: Register = on => {
       return { text: `${VIEW_SAID[verb]} (Now the default for every session.)` }
     }
     if (arg === 'reset') {
-      const s = await load($)
+      const read = readSave(await $.store.get(SAVE_KEY))
+      if (read.kind === 'newer') return { text: NOT_FROM_HERE }
       resetAskedAt = await $.clock.now()
+      if (read.kind === 'unreadable')
+        return {
+          text: [
+            "The shared save can't be read, so there is no hero to show. Every open Claude Code session shares it.",
+            `To start a new Clawd, run /rpg reset confirm within 2 minutes. The unreadable save is kept in the store under ${UNREADABLE_KEY}, not deleted.`,
+          ].join('\n'),
+        }
+      const s = read.kind === 'ok' ? read.save : newSave(Math.random)
       return {
         text: [
           `This permanently deletes ${heroName(s)}: level ${s.hero.level}, depth ${s.zone.depth}, ${s.hero.gold}g,`,
@@ -277,26 +352,30 @@ export const register: Register = on => {
       if (resetAskedAt === null || now - resetAskedAt > RESET_WINDOW_MS)
         return { text: 'Nothing was reset. Run /rpg reset first to see what would be lost, then /rpg reset confirm within 2 minutes.' }
       resetAskedAt = null
-      // Back up first: if anything below fails, the old hero is still recoverable.
-      const before = await serial(async () => {
-        const current = await load($)
-        await $.store.set(BACKUP_KEY, current)
-        await mutate(storeIO($), () => ({ save: newSave(Math.random), extra: null }))
-        return current
-      })
-      return { text: `Reset done: a new Clawd the Newbie sets out. The old save (${heroName(before)}, level ${before.hero.level}) is backed up; /rpg reset undo restores it.` }
+      const before = await serial(() => replaceSave($, newSave(Math.random), BACKUP_KEY))
+      if (before === null) return { text: NOT_FROM_HERE }
+      if (before.kind === 'ok')
+        return { text: `Reset done: a new Clawd the Newbie sets out. The old save (${heroName(before.save)}, level ${before.save.hero.level}) is backed up; /rpg reset undo restores it.` }
+      if (before.kind === 'unreadable')
+        return { text: `Reset done: a new Clawd the Newbie sets out. The unreadable save is kept in the store under ${UNREADABLE_KEY}.` }
+      return { text: 'Reset done: a new Clawd the Newbie sets out.' }
     }
     if (arg === 'reset undo') {
-      const backup = await $.store.get(BACKUP_KEY)
-      if (!isSave(backup)) return { text: 'There is no backup to restore.' }
-      await serial(() => mutate(storeIO($), () => ({ save: backup, extra: null })))
+      const backup = readSave(await $.store.get(BACKUP_KEY))
+      if (backup.kind !== 'ok') return { text: 'There is no backup to restore.' }
+      if ((await serial(() => replaceSave($, backup.save))) === null) return { text: NOT_FROM_HERE }
       await $.store.delete(BACKUP_KEY)
-      return { text: `Restored ${heroName(backup)}, level ${backup.hero.level}. The backup is used up.` }
+      return { text: `Restored ${heroName(backup.save)}, level ${backup.save.hero.level}. The backup is used up.` }
     }
     if (arg !== '')
       return {
         text: 'Usage: /rpg toggles the pane; /rpg show (full animated view), /rpg mini (just the status line) or /rpg hide (nothing; it keeps playing) set the default for every session, and with `here` (/rpg show here) this session only; /rpg reset starts a new hero.',
       }
+    const read = readSave(await $.store.get(SAVE_KEY))
+    if (read.kind === 'newer' || read.kind === 'unreadable') {
+      await setBlocked($, read.kind)
+      return { text: BLOCKED_SAID[read.kind] }
+    }
     const panes = await $.ui.panes()
     if (panes.some(p => p.id === PANE)) {
       await $.ui.close({ id: PANE })
@@ -340,9 +419,16 @@ export const register: Register = on => {
     if (e.props.hasSurvey || e.props.maxRows < 1) return next(e)
     const { value: shown = 'mini' } = await $.state.get(viewRef)
     if (shown === 'hide') return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const { value: blocked = null } = await $.state.get(blockedRef)
+    if (blocked)
+      return (
+        <Text color="warning" wrap="truncate-end">
+          {BLOCKED_SAID[blocked]}
+        </Text>
+      )
     const { value: save } = await $.state.get(saveRef)
     if (!save) return next(e)
-    const { Box, Text } = $.ui.resolve(e)
     const status = <Text wrap="truncate-end">{statusLine(save)}</Text>
     if (shown === 'mini' || e.props.maxRows < SCENE_ROWS + 1) return status
 
@@ -375,6 +461,13 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Button, Text } = $.ui.resolve(e)
+    const { value: blocked = null } = await $.state.get(blockedRef)
+    if (blocked)
+      return (
+        <Text color="warning" wrap="wrap">
+          {BLOCKED_SAID[blocked]}
+        </Text>
+      )
     const { value: s } = await $.state.get(saveRef)
     if (!s) return <Text dimColor>Clawd is lacing up their boots…</Text>
 

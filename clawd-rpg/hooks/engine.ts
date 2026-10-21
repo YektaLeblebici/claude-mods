@@ -265,10 +265,13 @@ export function makeItem(rng: Rng, depth: number, luck: Luck, min: Rarity = 'com
   return { name, slot, rarity, power, affixes, score: power + affixes.length * 3 }
 }
 
+/** The save format this build reads and writes: see format.ts before changing it. */
+export const FORMAT = 1
+
 export function newSave(rng: Rng): Save {
   const zone = makeZone(rng, 1)
   const save: Save = {
-    version: 1,
+    version: FORMAT,
     hero: { name: 'Clawd', level: 1, xp: 0, hp: 0, gold: 0, potions: 2, gear: { weapon: null, armor: null, trinket: null } },
     zone,
     phase: 'exploring',
@@ -285,8 +288,25 @@ export function newSave(rng: Rng): Save {
   return save
 }
 
+/** Whether a value has a save's parts, whatever format number it carries. */
+export function hasSaveShape(value: unknown): value is Save {
+  if (typeof value !== 'object' || value === null) return false
+  const s = value as Record<string, unknown>
+  const isRecord = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v)
+  return (
+    isRecord(s.hero) &&
+    typeof (s.hero as { level?: unknown }).level === 'number' &&
+    isRecord(s.zone) &&
+    isRecord(s.stats) &&
+    typeof s.phase === 'string' &&
+    Array.isArray(s.log) &&
+    Array.isArray(s.achievements)
+  )
+}
+
+/** A save in this build's own format. */
 export function isSave(value: unknown): value is Save {
-  return typeof value === 'object' && value !== null && (value as { version?: unknown }).version === 1
+  return hasSaveShape(value) && value.version === FORMAT
 }
 
 export const MAX_OMENS = 3

@@ -1,5 +1,4 @@
 import type { Save } from '../types'
-import { isSave } from './engine'
 
 /** Where a save lives: shared by every session on the machine. */
 export type SaveIO = {
@@ -9,7 +8,11 @@ export type SaveIO = {
   write: (save: Save) => Promise<void>
 }
 
-export const revOf = (value: unknown) => (isSave(value) ? (value.rev ?? 0) : 0)
+/** A stored value's revision, in any format; 0 when it has none. */
+export const revOf = (value: unknown) => {
+  const rev = typeof value === 'object' && value !== null ? (value as { rev?: unknown }).rev : undefined
+  return typeof rev === 'number' ? rev : 0
+}
 
 /**
  * Applies `change` to the stored save and writes the result one revision on.

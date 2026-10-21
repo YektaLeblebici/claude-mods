@@ -86,6 +86,7 @@ export type Stats = {
 export type LogEntry = { kind: LogKind; text: string; tone?: string; strong?: boolean }
 
 export type Save = {
+  /** The save format (FORMAT in engine.ts); a session never plays or writes a newer one. */
   version: 1
   /** Bumped on every write, so sessions can tell another one changed it. */
   rev?: number
@@ -112,11 +113,14 @@ export type Save = {
 /** How much of the game shows: the full animated view, the status line alone, or nothing. */
 export type View = 'show' | 'mini' | 'hide'
 
+/** Why a session cannot play the shared save: it comes from a newer version of the mod, or cannot be read. */
+export type Blocked = 'newer' | 'unreadable'
+
 /** What the band is playing after a tick: its effects in order, from `at` (a frame), against `enemy`. */
 export type Burst = { fx: Fx[]; at: number; enemy: Enemy | null }
 
 declare module 'claude-code' {
   interface PluginState {
-    'clawd-rpg': { save: Save; view: View; viewHere: View | null; frame: number; burst: Burst | null }
+    'clawd-rpg': { save: Save; view: View; viewHere: View | null; frame: number; burst: Burst | null; blocked: Blocked | null }
   }
 }
