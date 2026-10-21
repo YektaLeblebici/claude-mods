@@ -150,7 +150,7 @@ have it follow Clawd.
 - **Your work drives it.** Each prompt and each Claude reply is one step of the adventure.
 - **Treasure chests.** A `git commit` opens a chest: a big one at most every 30
   minutes, smaller ones in between.
-- **Various worlds,** from Whispering Meadow and the Gobbler Caves to the Sunken City of Merrow
+- **Many worlds,** from Whispering Meadow and the Gobbler Caves to the Sunken City of Merrow
   and the Hollow Between, each with its own monsters, two bosses and look.
 - **Loot from common to legendary,** with special effects (lifesteal, thorns, crits and more),
   named legendaries such as *Segfault, Bane of Pointers*, and a blacksmith who upgrades your
