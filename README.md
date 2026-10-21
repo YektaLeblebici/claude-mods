@@ -148,23 +148,16 @@ have it follow Clawd.
 ### How the game plays
 
 - **Your work drives it.** Each prompt and each Claude reply is one step of the adventure.
-- **Luck follows your commands.** A Bash command that succeeds makes the next step lucky (better
-  loot, harder hits); one that fails leaves an omen of bad luck.
-- **Commits open treasure chests.** A `git commit` opens a chest: a big one at most every 30
+- **Treasure chests.** A `git commit` opens a chest: a big one at most every 30
   minutes, smaller ones in between.
-- **Twelve worlds,** from Whispering Meadow and the Gobbler Caves to the Sunken City of Merrow
+- **Various worlds,** from Whispering Meadow and the Gobbler Caves to the Sunken City of Merrow
   and the Hollow Between, each with its own monsters, two bosses and look.
-- **A Christmas world** joins them from November 15 to January 15: the Christmas Market,
-  Mistletoe Hollow and the Gingerbread Quarter, with gingerbread brutes, snowman sentries, rogue
-  elves, Krampus and Santa Claus himself. Beat Santa and you may win a Little Reindeer or a
-  Jolly Snowman.
 - **Loot from common to legendary,** with special effects (lifesteal, thorns, crits and more),
   named legendaries such as *Segfault, Bane of Pointers*, and a blacksmith who upgrades your
   gear with spare gold.
-- **Fourteen pets,** each giving a small bonus, including four rare wild characters who appear
+- **Pets,** each giving a small bonus, including rare wild characters who appear
   with "A wild … appears!" and join you once beaten.
-- **Titles as your fame grows,** from Clawd the Newbie through Slayer, Dragonbane and Mythic to
-  Clawd the Singularity, plus 15 achievements to unlock.
+- **Titles as your fame grows,** from Clawd the Newbie through Slayer and beyond, plus 15 achievements to unlock.
 - **Skills** unlock as Clawd levels up: Power Strike, Second Wind, Riposte, Execute and more.
 - **One hero everywhere.** Every Claude Code session on your machine plays the same Clawd.
 - **Safe to leave on.** A hiccup in the game never blocks a prompt or a command. It only notices
@@ -184,7 +177,7 @@ have it follow Clawd.
 
 ## emoji-title
 
-Gives every Claude Code session title one fitting emoji, so your session list is easier to scan:
+Gives every Claude Code session title one fitting emoji, so your session list in `claude agents` is easier to scan:
 
 ```
 🐛 Fix flaky login test
