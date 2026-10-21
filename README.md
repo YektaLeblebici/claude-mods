@@ -37,7 +37,6 @@ Answer `y` to add the marketplace, then pick a scope (**user** puts it in every 
 - **Updating:** `claude plugin marketplace update local-mods`, then
   `claude plugin update <mod>@local-mods` and `/reload-plugins`.
 - **Removing:** `claude plugin uninstall <mod>`, or switch it off in `/plugin`.
-- **Access:** the repository is private, so installing needs GitHub access to it.
 
 ## q: a task queue
 
