@@ -1,6 +1,6 @@
 {
   "name": "clawd-rpg",
   "version": "0.4.0",
-  "description": "Claude RPG: a passive text RPG your Claude Code session plays for you",
+  "description": "Claude RPG: a passive pixel-art RPG that Claude Code plays for you while you work",
   "types": "./types/index.d.ts"
 }
