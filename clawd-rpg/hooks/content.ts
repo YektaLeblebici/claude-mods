@@ -7,12 +7,20 @@ export type EnemyDef = {
   atk: number
   def: number
   verbs: [string, string]
+  /** Its own colour, where the world's foe or boss colour won't do. */
+  tint?: string
 }
 
-export type BossDef = EnemyDef & { intro: string; defeat: string }
+/** A boss; one with `pets` gives one of them at `petChance` when beaten, and they drop nowhere else. */
+export type BossDef = EnemyDef & { intro: string; defeat: string; pets?: PetId[]; petChance?: number }
+
+/** A stretch of the year as [month, day] pairs, months from 1; `from` after `to` runs over New Year. */
+export type Season = { from: [number, number]; to: [number, number] }
 
 export type Biome = {
   id: string
+  /** When set, new zones go here only in this season; otherwise all year. */
+  season?: Season
   names: string[]
   descs: string[]
   enemies: EnemyDef[]
@@ -285,6 +293,26 @@ export const BIOMES: Biome[] = [
     ],
     ambient: ['You hear your own footsteps, a second late.', 'A comet passes, waving.', 'You find a door standing in nothing. Locked.', 'The silence is very loud here.', 'Your shadow wanders off for a bit.', 'A star whispers your next commit message.'],
   },
+  {
+    id: 'christmas',
+    season: { from: [11, 15], to: [1, 15] },
+    names: ['The Christmas Market', 'Mistletoe Hollow', 'The Gingerbread Quarter'],
+    descs: [
+      'Stalls glow with candles and the air smells of cinnamon and hot wine.',
+      'Snow falls in fat, slow flakes. Somewhere, sleigh bells.',
+      'Every roof is iced, every window lit, and something is watching from the chimneys.',
+    ],
+    enemies: [
+      { name: 'Gingerbread Brute', desc: 'Baked too long. Holds a grudge about it.', hp: 1.2, atk: 1.1, def: 1.0, verbs: ['crumbles onto', 'icing-slaps'], tint: '#c07a3a' },
+      { name: 'Snowman Sentry', desc: 'Carrot nose, coal eyes, zero mercy.', hp: 1.1, atk: 0.9, def: 1.3, verbs: ['pelts', 'body-checks'], tint: '#f5f5f5' },
+      { name: 'Rogue Elf', desc: 'Quit the workshop. Kept the tools.', hp: 0.7, atk: 1.2, def: 0.7, verbs: ['hammers', 'jabs'], tint: '#43a047' },
+    ],
+    bosses: [
+      { name: 'Krampus', desc: "Santa's shadow, with chains and a sack for the naughty.", hp: 1.2, atk: 1.2, def: 1.0, verbs: ['lashes', 'rattles chains at'], tint: '#8d6e63', intro: 'Chains rattle down the lane and every candle gutters. Krampus has checked his list.', defeat: 'Krampus drops his chains and slinks back up the chimney he came from.' },
+      { name: 'Santa Claus', desc: 'Here to test whether you are naughty or nice. Hits like a sack of presents.', hp: 1.3, atk: 1.0, def: 1.1, verbs: ['sleigh-bashes', 'pelts with coal'], tint: '#e53935', intro: 'Sleigh bells, then a thud. Santa Claus cracks his knuckles: "Let\'s see if you\'re nice."', defeat: 'Santa Claus laughs, "Ho ho ho! Nice, after all," and dusts the snow off his coat.', pets: ['reindeer', 'snowman'], petChance: 0.1 },
+    ],
+    ambient: ['A choir sings three streets away, slightly off-key.', 'You buy a roasted chestnut. It is mostly shell.', 'Someone has hung mistletoe over the path. Clawd walks faster.', 'A gingerbread house is missing a wall. Crumbs lead away.', 'Snow settles on your shoulders like a cloak.', 'A child points at you and shouts "Elf!"'],
+  },
 ]
 
 export const MODIFIERS: Record<ZoneModifier, { label: string; desc: string }> = {
@@ -373,6 +401,9 @@ export const PETS: Record<PetId, { name: string; bonus: PetBonus; base: number; 
   tarbolts: { name: 'Linux Tarbolts', bonus: 'crit', base: 2, unit: '% crit', color: '#8d6e63' },
   freeman: { name: 'Gordon Freeman', bonus: 'def', base: 1, unit: ' DEF', color: '#ff8f00' },
   sam: { name: 'Sam Altermann', bonus: 'xp', base: 3, unit: '% XP', color: '#7fa7c9' },
+  // Christmas pets: only Santa gives them (see the christmas world's bosses).
+  reindeer: { name: 'Little Reindeer', bonus: 'crit', base: 2, unit: '% crit', color: '#a1887f' },
+  snowman: { name: 'Jolly Snowman', bonus: 'def', base: 1, unit: ' DEF', color: '#f5f5f5' },
 }
 export const PET_MAX_LEVEL = 5
 
@@ -390,8 +421,10 @@ export const LEGENDS: Legend[] = [
 ]
 /** Of every encounter Clawd could meet a wild character in, the share that is one. */
 export const LEGEND_CHANCE = 0.01
-/** The pets chests, bosses and the road can drop: every pet but the wild characters. */
-export const COMMON_PETS = Object.keys(PETS).filter(id => !LEGENDS.some(l => l.id === id)) as PetId[]
+/** The pets chests, bosses and the road can drop: every pet but the wild characters and a boss's own. */
+export const COMMON_PETS = Object.keys(PETS).filter(
+  id => !LEGENDS.some(l => l.id === id) && !BIOMES.some(b => b.bosses.some(boss => boss.pets?.includes(id as PetId))),
+) as PetId[]
 
 
 /** Titles in rising order of renown; the hero holds the last one reached. */

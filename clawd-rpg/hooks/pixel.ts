@@ -215,7 +215,8 @@ export function composePixelScene(save: Save, frame: number, burst: Burst | null
   const showEnemy =
     enemy !== null &&
     (save.phase === 'fighting' || (active !== null && !['camp', 'recover', 'loot', 'level', 'gold', 'chest', 'pet', 'forge'].includes(fx!)))
-  const pet = save.hero.activePet ? PETS[save.hero.activePet] : null
+  // A pet only a newer version knows is not drawn.
+  const pet = save.hero.activePet && save.hero.activePet in PETS ? PETS[save.hero.activePet] : null
   const home = pet ? 7 : 2
   const propsEnd = showEnemy ? W - 16 : W
 

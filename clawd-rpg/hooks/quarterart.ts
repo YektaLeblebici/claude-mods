@@ -278,6 +278,25 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
       { grid: ['..pppp..', '.p....p.', 'p..vv..p', 'p.vvvv.p', 'p.vvvv.p', 'p..vv..p', '.p....p.', '..pppp..'], palette: { p: '#ab47bc', v: '#4a148c' } },
     ],
   },
+  christmas: {
+    foe: '#c62828',
+    boss: '#7b1fa2',
+    sky: ['#152040', '#1e2c55', '#2a3b6b', '#3d5085'],
+    skyArt: {
+      grid: strip(84, 6, [[12, 0, MOON], [3, 2, DOT], [26, 0, ['y']], [33, 4, DOT], [41, 1, DOT], [50, 3, ['y']], [58, 0, DOT], [66, 2, DOT], [74, 4, ['y']], [80, 1, DOT]]),
+      palette: { m: '#f4ecc2', x: '#ffffff', y: '#ffe082' },
+    },
+    far: { points: [1, 4, 1, 5, 2, 4, 1, 6, 2, 4], spacing: 3, shape: 'sharp', color: '#1b4332', cap: { color: '#ffffff', depth: 1, from: 3 } },
+    near: { points: [0, 3, 3, 0, 0, 4, 4, 0, 3, 3, 0, 0], spacing: 3, shape: 'step', color: '#5d4037', cap: { color: '#ffffff', depth: 1, from: 2 }, windows: '#ffd54f' },
+    mid: { grid: ['.....r..............g.....', 'ww..rrr..www.......ggg.ww.'], palette: { w: '#ffffff', r: '#e53935', g: '#43a047' } },
+    ground: { grid: ['wWwWwwWwWwWW', 'WwWwWwWWwWwW'], palette: { w: '#f2f7fb', W: '#dde9f3' } },
+    props: [
+      { grid: ['....y....', '...ggg...', '..grggg..', '..gggbg..', '.ggyggrg.', 'gggggggyg', '....t....', '...ttt...'], palette: { y: '#ffd54f', g: '#2e7d32', r: '#e53935', b: '#42a5f5', t: '#6d4c41' } },
+      { grid: ['rwrwrwrwrwrw', 'rwrwrwrwrwrw', '.p........p.', '.p.yo.oy..p.', '.pbbbbbbbbp.', '.pbbbbbbbbp.', '.p........p.', '.p........p.'], palette: { r: '#c62828', w: '#ffffff', p: '#6d4c41', b: '#8d6e63', y: '#ffd54f', o: '#ff7043' } },
+      { grid: ['....wwww....', '...wwccww...', '..wwccccww..', '.wwccccccww.', '..cccccccc..', '..cyyccyyc..', '..cccddccc..', '..cccddccc..'], palette: { w: '#ffffff', c: '#b5651d', y: '#ffd54f', d: '#5d4037' } },
+      { grid: ['...y.y....', 'rrrryrrr..', 'rrrryrrrgg', 'rrrryrrrgg'], palette: { r: '#e53935', y: '#ffd54f', g: '#43a047' } },
+    ],
+  },
 }
 
 // ── Companions and props of the road, at quarter resolution ───────────
@@ -297,6 +316,9 @@ export const PET_Q: Record<PetId, Grid> = {
   tarbolts: ['..kk....', '..ee...k', '.bbbb.ke', '..b..b.k'],
   freeman: ['..kk...k', '..ek..k.', '.bbbbk..', '..b..b..'],
   sam: ['..kk....', '..ee..o.', '.bbbb.oo', '..b..b..'],
+  // Christmas pets: antlers `d` and a bright nose `o`; a snowman with a coal hat and eyes and a carrot.
+  reindeer: ['.....d.d', '.....bko', 'bbbbbbb.', '.b.b.b..'],
+  snowman: ['..kkkk..', '..bbkbo.', '.bbbbbb.', '.bbbbbb.'],
 }
 
 export const CAMPFIRE_Q: [Stamp, Stamp] = [

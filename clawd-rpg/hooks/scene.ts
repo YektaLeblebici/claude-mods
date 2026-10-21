@@ -234,7 +234,7 @@ const ARCHETYPE_RULES: [RegExp, Archetype][] = [
   [/spider|scorpion|crab|hermit|turtle/i, 'crawler'],
   [/bee|pixie|crow|hawk|harpy|wisp|lantern|sprite|gaze|bat/i, 'flyer'],
   [/leech|slug|glowworm|star eater|anglerfiend/i, 'blob'],
-  [/scarecrow|mimic|golem|armor|automaton|sentinel|steam|avalanche|guardian|null knight|clockwork|twigling/i, 'construct'],
+  [/scarecrow|mimic|golem|armor|automaton|sentinel|steam|avalanche|guardian|null knight|clockwork|twigling|snowman/i, 'construct'],
   [/wraith|banshee|specter|elemental|echo|stalker|paradox|ghost/i, 'spirit'],
   [/badger|boar|wolf|stag|frog|jackal|shark|salamander|hound|ram|yeti/i, 'beast'],
 ]

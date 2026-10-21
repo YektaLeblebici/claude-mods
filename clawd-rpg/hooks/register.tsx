@@ -154,8 +154,10 @@ async function replaceSave($: Engine, save: Save, backupKey?: string) {
 
 const advance = ($: Engine) =>
   serial(async () => {
+    // The date picks which worlds are open when Clawd moves on (the Christmas world in its season).
+    const now = await $.clock.now()
     const { before, save, extra } = await mutate(storeIO($), current => {
-      const result = tick(current, Math.random)
+      const result = tick(current, Math.random, now)
       return { save: result.save, extra: result }
     })
     for (const text of extra.toasts) notify($, text)
@@ -558,7 +560,8 @@ export const register: Register = on => {
         {(s.hero.pets ?? []).length === 0 ? (
           <Text dimColor>None yet.</Text>
         ) : (
-          (s.hero.pets ?? []).map((owned, i) => {
+          // A pet only a newer version knows is left out rather than breaking the pane.
+          (s.hero.pets ?? []).filter(owned => owned.id in PETS).map((owned, i) => {
             const pet = PETS[owned.id]
             const isActive = s.hero.activePet === owned.id
             const amount = pet.base * (1 + 0.5 * (owned.level - 1))

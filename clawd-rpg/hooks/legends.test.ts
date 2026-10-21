@@ -88,7 +88,8 @@ test('a wild character that knocks Clawd out can turn up again later', () => {
 
 test('chests, bosses and the road never hand out a wild character as a pet', () => {
   for (const legend of LEGENDS) expect(COMMON_PETS.includes(legend.id)).toBe(false)
-  expect(COMMON_PETS.length).toBe(Object.keys(PETS).length - LEGENDS.length)
+  // Every pet but the wild characters and Santa's two Christmas pets.
+  expect(COMMON_PETS.length).toBe(Object.keys(PETS).length - LEGENDS.length - 2)
 })
 
 test('battle text names a wild character by name, without "the"', () => {

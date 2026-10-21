@@ -23,6 +23,7 @@ import {
   type PetBonus,
   type Biome,
   type EnemyDef,
+  type Season,
 } from './content'
 
 export type Rng = () => number
@@ -55,7 +56,9 @@ export const isCommit = (command: string) => /(?:^|[;&|(\n])\s*git\s+(?:-\S+\s+(
 export function petBonus(hero: Save['hero'], kind: PetBonus): number {
   const owned = hero.pets?.find(p => p.id === hero.activePet)
   if (!owned) return 0
-  const pet = PETS[owned.id]
+  // A pet a newer version added, unknown here, gives nothing rather than failing the tick.
+  const pet = PETS[owned.id] as (typeof PETS)[PetId] | undefined
+  if (!pet) return 0
   return pet.bonus === kind ? pet.base * (1 + 0.5 * (owned.level - 1)) : 0
 }
 export const biomeOf = (zone: Zone): Biome => BIOMES.find(b => b.id === zone.biome) ?? BIOMES[0]!
@@ -158,8 +161,19 @@ function heal(s: Save, amount: number) {
   s.hero.hp = Math.min(heroStats(s.hero).maxHp, s.hero.hp + Math.max(0, Math.round(amount)))
 }
 
-export function makeZone(rng: Rng, depth: number, previousBiome?: string): Zone {
-  const biome = pick(rng, BIOMES.filter(b => b.id !== previousBiome))
+/** Whether `now` (ms since epoch, local time) falls in a season; the ends are included. */
+export function inSeason(season: Season, now: number): boolean {
+  const date = new Date(now)
+  const day = (date.getMonth() + 1) * 100 + date.getDate()
+  const from = season.from[0] * 100 + season.from[1]
+  const to = season.to[0] * 100 + season.to[1]
+  return from <= to ? day >= from && day <= to : day >= from || day <= to
+}
+
+/** A new zone, in any world but the last one; a seasonal world only in its season, and never without `now`. */
+export function makeZone(rng: Rng, depth: number, previousBiome?: string, now?: number): Zone {
+  const open = BIOMES.filter(b => b.id !== previousBiome && (!b.season || (now !== undefined && inSeason(b.season, now))))
+  const biome = pick(rng, open)
   const modifier = rng() < 0.3 ? pick(rng, Object.keys(MODIFIERS) as ZoneModifier[]) : null
   return {
     depth,
@@ -233,6 +247,7 @@ export function makeEnemy(rng: Rng, depth: number, def: EnemyDef, kind: EnemyKin
     isBoss,
     isElite,
     defeat: 'defeat' in def && typeof def.defeat === 'string' ? def.defeat : `${the(name, true)} is defeated.`,
+    ...(def.tint ? { tint: def.tint } : {}),
   }
 }
 
@@ -432,6 +447,9 @@ function win(s: Save, luck: Luck, rng: Rng, toasts: string[], fx: Fx[]) {
   const lootChance = (e.isBoss ? 1 : e.legend ? 0.5 : e.isElite ? 0.35 : luck === 'lucky' ? 0.2 : 0.1) + petBonus(s.hero, 'find') / 100
   if (rng() < lootChance) gainItem(s, loot(s, rng, luck, e.isBoss ? 'rare' : 'common'), toasts, fx)
   if (e.isBoss && rng() < 0.03) gainPet(s, pick(rng, COMMON_PETS), toasts, fx)
+  // A boss with pets of its own (Santa) may give one of them; they drop nowhere else.
+  const own = e.isBoss ? biomeOf(s.zone).bosses.find(b => b.name === e.name) : undefined
+  if (own?.pets && rng() < (own.petChance ?? 0)) gainPet(s, pick(rng, own.pets), toasts, fx)
   // A beaten wild character joins as a pet, and never appears again.
   if (e.legend) {
     s.legendsBeaten = [...(s.legendsBeaten ?? []), e.legend]
@@ -542,7 +560,7 @@ function recover(s: Save, luck: Luck, fx: Fx[]) {
   log(s, 'info', `Back on your feet at the edge of ${s.zone.name}.`)
 }
 
-function camp(s: Save, rng: Rng, toasts: string[], fx: Fx[]) {
+function camp(s: Save, rng: Rng, toasts: string[], fx: Fx[], now?: number) {
   fx.push('camp')
   const price = potionPrice(s.zone.depth)
   let bought = 0
@@ -554,7 +572,7 @@ function camp(s: Save, rng: Rng, toasts: string[], fx: Fx[]) {
   s.hero.hp = heroStats(s.hero).maxHp
   if (bought) log(s, 'info', `The camp merchant sells you ${bought} potion${bought > 1 ? 's' : ''}.`)
   forge(s, fx)
-  s.zone = makeZone(rng, s.zone.depth + 1, s.zone.biome)
+  s.zone = makeZone(rng, s.zone.depth + 1, s.zone.biome, now)
   s.phase = 'exploring'
   s.stats.maxDepth = Math.max(s.stats.maxDepth, s.zone.depth)
   const mod = s.zone.modifier ? ` [${MODIFIERS[s.zone.modifier].label}: ${MODIFIERS[s.zone.modifier].desc}]` : ''
@@ -672,8 +690,11 @@ function achievements(s: Save, toasts: string[]) {
   }
 }
 
-/** One game tick: a prompt or a response. Consumes the pending luck. */
-export function tick(save: Save, rng: Rng): TickResult {
+/**
+ * One game tick: a prompt or a response. Consumes the pending luck. `now` (ms since epoch) opens the
+ * seasonal worlds in their season when Clawd moves on; without it, only the all-year ones.
+ */
+export function tick(save: Save, rng: Rng, now?: number): TickResult {
   const s = clone(save)
   const toasts: string[] = []
   const fx: Fx[] = []
@@ -692,7 +713,7 @@ export function tick(save: Save, rng: Rng): TickResult {
   if (s.phase === 'exploring') explore(s, luck, rng, fx, toasts)
   else if (s.phase === 'fighting' && s.enemy) fight(s, luck, rng, toasts, fx)
   else if (s.phase === 'recovering') recover(s, luck, fx)
-  else if (s.phase === 'camp') camp(s, rng, toasts, fx)
+  else if (s.phase === 'camp') camp(s, rng, toasts, fx, now)
   else s.phase = 'exploring'
 
   levelUps(s, toasts, fx)

@@ -9,7 +9,7 @@ export type Fx =
   | 'win' | 'loot' | 'gold' | 'potion' | 'level' | 'ko' | 'rest' | 'recover' | 'camp'
   | 'forge' | 'chest' | 'pet' | 'legend'
 export type LegendId = 'tim' | 'tarbolts' | 'freeman' | 'sam'
-export type PetId = 'slime' | 'duck' | 'bat' | 'dragon' | 'turtle' | 'cat' | 'owl' | 'wisp' | LegendId
+export type PetId = 'slime' | 'duck' | 'bat' | 'dragon' | 'turtle' | 'cat' | 'owl' | 'wisp' | LegendId | 'reindeer' | 'snowman'
 export type OwnedPet = { id: PetId; level: number }
 export type ChestKind = 'good' | 'small'
 export type LogKind = 'info' | 'lucky' | 'unlucky' | 'loot' | 'combat' | 'level' | 'boss' | 'ko'

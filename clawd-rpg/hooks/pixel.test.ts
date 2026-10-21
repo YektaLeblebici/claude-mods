@@ -78,7 +78,7 @@ test('the caption is kept as text', () => {
 test('the enemy nameplate sits right by its enemy: over it, or just beside it', () => {
   const base = newSave(always(0.5))
   for (const biome of BIOMES) {
-    for (const def of [biome.enemies[0]!, biome.enemies[3]!, biome.bosses[0]!]) {
+    for (const def of [biome.enemies[0]!, biome.enemies.at(-1)!, biome.bosses[0]!]) {
       const enemy = makeEnemy(always(0.5), 4, def, def === biome.bosses[0] ? 'boss' : 'normal')
       const s: Save = { ...base, zone: { ...base.zone, biome: biome.id }, phase: 'fighting', enemy }
       let col = 0
