@@ -22,6 +22,7 @@ import {
   TITLES,
   type PetBonus,
   type Biome,
+  type BossItem,
   type EnemyDef,
   type Season,
 } from './content'
@@ -280,6 +281,12 @@ export function makeItem(rng: Rng, depth: number, luck: Luck, min: Rarity = 'com
   return { name, slot, rarity, power, affixes, score: power + affixes.length * 3 }
 }
 
+/** A boss's own legendary, made one level deeper than where it drops, so it is worth having. */
+export function bossItem(rng: Rng, depth: number, def: BossItem): Item {
+  const power = Math.max(1, Math.round((2 + (depth + 1) * 1.5) * RARITY_MULT.legendary * between(rng, 0.85, 1.15)))
+  return { name: def.name, slot: def.slot, rarity: 'legendary', power, affixes: [...def.affixes], score: power + def.affixes.length * 3 }
+}
+
 /** The save format this build reads and writes: see format.ts before changing it. */
 export const FORMAT = 1
 
@@ -447,9 +454,10 @@ function win(s: Save, luck: Luck, rng: Rng, toasts: string[], fx: Fx[]) {
   const lootChance = (e.isBoss ? 1 : e.legend ? 0.5 : e.isElite ? 0.35 : luck === 'lucky' ? 0.2 : 0.1) + petBonus(s.hero, 'find') / 100
   if (rng() < lootChance) gainItem(s, loot(s, rng, luck, e.isBoss ? 'rare' : 'common'), toasts, fx)
   if (e.isBoss && rng() < 0.03) gainPet(s, pick(rng, COMMON_PETS), toasts, fx)
-  // A boss with pets of its own (Santa) may give one of them; they drop nowhere else.
+  // A boss with pets (Santa) or an item (the Halloween bosses) of its own may give it; they drop nowhere else.
   const own = e.isBoss ? biomeOf(s.zone).bosses.find(b => b.name === e.name) : undefined
   if (own?.pets && rng() < (own.petChance ?? 0)) gainPet(s, pick(rng, own.pets), toasts, fx)
+  if (own?.item && rng() < own.item.chance) gainItem(s, bossItem(rng, s.zone.depth, own.item), toasts, fx)
   // A beaten wild character joins as a pet, and never appears again.
   if (e.legend) {
     s.legendsBeaten = [...(s.legendsBeaten ?? []), e.legend]

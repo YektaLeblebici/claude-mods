@@ -42,7 +42,8 @@ test('in season, the Christmas world is as likely as any other; out of season, o
     for (let i = 0; i < 6000; i++) if (makeZone(rng, 3, 'meadow', now).biome === 'christmas') n++
     return n / 6000
   }
-  const others = BIOMES.filter(b => b.id !== 'meadow').length
+  // Every world but the last one is open, the seasonal ones only in their season.
+  const others = BIOMES.filter(b => b.id !== 'meadow' && (!b.season || inSeason(b.season, on(12, 1)))).length
   expect(Math.abs(share(on(12, 1)) - 1 / others) < 0.02).toBe(true)
   expect(share(on(10, 1))).toBe(0)
   expect(share(undefined)).toBe(0)

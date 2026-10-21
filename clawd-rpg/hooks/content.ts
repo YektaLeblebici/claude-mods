@@ -11,8 +11,14 @@ export type EnemyDef = {
   tint?: string
 }
 
-/** A boss; one with `pets` gives one of them at `petChance` when beaten, and they drop nowhere else. */
-export type BossDef = EnemyDef & { intro: string; defeat: string; pets?: PetId[]; petChance?: number }
+/** A boss's own legendary: always this name, slot and effects, given at `chance` when it is beaten. */
+export type BossItem = { name: string; slot: Slot; affixes: Affix[]; chance: number }
+
+/**
+ * A boss; one with `pets` gives one of them at `petChance` when beaten, one with `item` that item at
+ * its chance. Neither drops anywhere else.
+ */
+export type BossDef = EnemyDef & { intro: string; defeat: string; pets?: PetId[]; petChance?: number; item?: BossItem }
 
 /** A stretch of the year as [month, day] pairs, months from 1; `from` after `to` runs over New Year. */
 export type Season = { from: [number, number]; to: [number, number] }
@@ -292,6 +298,26 @@ export const BIOMES: Biome[] = [
       { name: 'Entropy Herself', desc: 'The end of all things, wearing a polite smile.', hp: 1.3, atk: 1.4, def: 1.0, verbs: ['decays', 'ends'], intro: '“Oh,” she says, kindly. “You’re still here?”', defeat: 'Entropy smiles: “Later, then.” She is gone.' },
     ],
     ambient: ['You hear your own footsteps, a second late.', 'A comet passes, waving.', 'You find a door standing in nothing. Locked.', 'The silence is very loud here.', 'Your shadow wanders off for a bit.', 'A star whispers your next commit message.'],
+  },
+  {
+    id: 'halloween',
+    season: { from: [10, 15], to: [11, 15] },
+    names: ['The Pumpkin Patch', 'Ravenmoor Manor', 'The Candlelit Fair'],
+    descs: [
+      'Pumpkins grin from every furrow, and not all of them were carved by hand.',
+      'The manor windows flicker orange. Someone inside is laughing at a joke you missed.',
+      'Stalls of toffee apples and fortune tellers, lit by candles that never burn down.',
+    ],
+    enemies: [
+      { name: "Jack-o'-Lantern", desc: 'Grins wider the closer it gets.', hp: 0.9, atk: 1.1, def: 0.9, verbs: ['scorches', 'headbutts'], tint: '#ff8f00' },
+      { name: 'Poltergeist', desc: 'Rearranges the furniture. Then you.', hp: 0.7, atk: 1.2, def: 0.7, verbs: ['hurls a chair at', 'rattles'], tint: '#cfd8dc' },
+      { name: 'Candy Ghoul', desc: 'Trick. Definitely trick.', hp: 1.2, atk: 1.0, def: 1.1, verbs: ['gnaws', 'sugar-slams'], tint: '#ce93d8' },
+    ],
+    bosses: [
+      { name: 'The Headless Horseman', desc: 'A rider without a head, holding a burning pumpkin instead.', hp: 1.2, atk: 1.2, def: 1.0, verbs: ['rides down', 'hurls a burning pumpkin at'], tint: '#90a4ae', intro: 'Hoofbeats, then a laugh with no mouth to make it. The Headless Horseman rides out of the fog.', defeat: 'The Horseman reins in, bows where his head should be, and gallops off into the mist.', item: { name: "Hollowhead, the Horseman's Blade", slot: 'weapon', affixes: ['keen', 'vampiric', 'thorns'], chance: 0.1 } },
+      { name: 'Old Grizelda', desc: 'The Witch of Ravenmoor, stirring a cauldron that stirs back.', hp: 1.1, atk: 1.1, def: 1.1, verbs: ['hexes', 'ladles boiling brew at'], tint: '#66bb6a', intro: 'A cauldron bubbles over. Old Grizelda looks up: "Ah. An ingredient."', defeat: 'Old Grizelda cackles, climbs onto her broom, and is a speck against the moon.', item: { name: "Grizelda's Black Cat", slot: 'trinket', affixes: ['fortunate', 'keen', 'warding'], chance: 0.1 } },
+    ],
+    ambient: ['A crow lands on a pumpkin and stares at you.', 'Somewhere, a door creaks open by itself.', 'You find a toffee apple. It is still warm. Suspicious.', 'Fog rolls over the graves like a slow grey tide.', 'A black cat crosses your path, then crosses it again.', 'Children in bedsheets run past, giggling.'],
   },
   {
     id: 'christmas',

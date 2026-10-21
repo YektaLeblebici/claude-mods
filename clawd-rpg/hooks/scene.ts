@@ -235,7 +235,7 @@ const ARCHETYPE_RULES: [RegExp, Archetype][] = [
   [/bee|pixie|crow|hawk|harpy|wisp|lantern|sprite|gaze|bat/i, 'flyer'],
   [/leech|slug|glowworm|star eater|anglerfiend/i, 'blob'],
   [/scarecrow|mimic|golem|armor|automaton|sentinel|steam|avalanche|guardian|null knight|clockwork|twigling|snowman/i, 'construct'],
-  [/wraith|banshee|specter|elemental|echo|stalker|paradox|ghost/i, 'spirit'],
+  [/wraith|banshee|specter|elemental|echo|stalker|paradox|ghost|poltergeist/i, 'spirit'],
   [/badger|boar|wolf|stag|frog|jackal|shark|salamander|hound|ram|yeti/i, 'beast'],
 ]
 const BOSS_WYRM = /wyrm|worm|ouroth|gulper|kraken|phoenix|roc|maw/i

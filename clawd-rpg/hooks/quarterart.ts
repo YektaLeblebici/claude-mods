@@ -278,6 +278,25 @@ export const QUARTER_LOOKS: Record<string, QuarterLook> = {
       { grid: ['..pppp..', '.p....p.', 'p..vv..p', 'p.vvvv.p', 'p.vvvv.p', 'p..vv..p', '.p....p.', '..pppp..'], palette: { p: '#ab47bc', v: '#4a148c' } },
     ],
   },
+  halloween: {
+    foe: '#ff8f00',
+    boss: '#7e57c2',
+    sky: ['#140a24', '#1f0f36', '#2e1749', '#4a2360'],
+    skyArt: {
+      grid: strip(80, 6, [[30, 0, ['...mmmm...', '.mmmmmmmm.', 'mmmmmmmmmm', 'mmmmmmmmmm', '.mmmmmmmm.', '...mmmm...']], [8, 1, ['b.b', '.b.']], [18, 3, ['b.b', '.b.']], [50, 2, ['b.b', '.b.']], [3, 4, DOT], [44, 0, DOT], [60, 3, DOT], [70, 1, DOT], [76, 4, DOT]]),
+      palette: { m: '#ffcc80', b: '#0b0612', x: '#e1bee7' },
+    },
+    far: { points: [2, 3, 2, 4, 5, 3, 2, 3, 4, 2], spacing: 8, shape: 'smooth', color: '#1a1026' },
+    near: { points: [0, 2, 2, 5, 5, 3, 0, 0, 3, 3, 0, 0], spacing: 3, shape: 'step', color: '#0f0a18', windows: '#ffa726' },
+    mid: { grid: ['..g.........g..........', '.ooo.......ooo.....o...'], palette: { o: '#ef6c00', g: '#33691e' } },
+    ground: { grid: ['dDdDddDdDdDD', 'DdDdDdDDdDdD'], palette: { d: '#2b2238', D: '#211a2c' } },
+    props: [
+      { grid: ['....gg....', '.oooooooo.', 'ooyooooyoo', 'oooooooooo', 'ooyyyyyyoo', '.oooooooo.'], palette: { o: '#ef6c00', y: '#ffeb3b', g: '#33691e' } },
+      { grid: ['..gggg..', '.gggggg.', 'gggkkggg', 'ggkkkkgg', 'gggkkggg', 'gggggggg', 'gggggggg'], palette: { g: '#78909c', k: '#455a64' } },
+      { grid: ['b.....b.', '.b..b.b.', '..bb..b.', '...bbb..', '....b...', '....b...', '....b...', '...bbb..'], palette: { b: '#5d4037' } },
+      { grid: ['.g.g..g.', 'gggggggg', 'kkkkkkkk', 'kkkkkkkk', '.kkkkkk.', '.k....k.'], palette: { g: '#76ff03', k: '#424242' } },
+    ],
+  },
   christmas: {
     foe: '#c62828',
     boss: '#7b1fa2',
