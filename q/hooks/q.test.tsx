@@ -10,6 +10,7 @@ import {
   addItem,
   controlText,
   judgeBash,
+  judgeForkBash,
   judgeForkPath,
   isQueueable,
   isSameCommand,
@@ -84,6 +85,38 @@ describe('queue logic', () => {
     expect(judgeForkPath('/r/src/a.ts', fork)).toBeDefined()
     expect(judgeForkPath('/tmp/scratch.txt', fork)).toBeUndefined()
     expect(judgeForkPath('/r/src/a.ts', { ...fork, canMerge: true })).toBeUndefined()
+  })
+
+  test('the guards see through `..`, restore --worktree, GitHub writes, and main-checkout paths in a fork\'s commands', () => {
+    const fork = { worktree: '/r/.claude/worktrees/q-x', mainCheckout: '/r', canMerge: false }
+    expect(judgeForkPath('/r/.claude/worktrees/q-x/../../../src/a.ts', fork)).toBeDefined()
+    expect(judgeForkPath('/r/.claude/worktrees/q-x//src/./a.ts', fork)).toBeUndefined()
+
+    for (const cmd of ['git restore --staged --worktree a.ts', 'git restore -SW a.ts', 'git restore --worktree --staged .']) {
+      expect(judgeBash(cmd, 'main'), cmd).toBeDefined()
+    }
+    expect(judgeBash('git restore -S a.ts', 'main')).toBeUndefined()
+
+    for (const cmd of [
+      'gh pr merge 3 --squash',
+      'gh issue comment 4 -b hi',
+      'gh release create v1',
+      'gh repo delete me/x --yes',
+      'gh repo edit --visibility public',
+      'gh api -X DELETE repos/me/x',
+      'gh api --method=PATCH repos/me/x',
+      'gh api repos/me/x/issues -f title=hi',
+    ]) {
+      expect(judgeBash(cmd, 'main'), cmd).toBeUndefined()
+      expect(judgeBash(cmd, 'claude-task'), cmd).toMatch(/queued yourself/)
+      expect(judgeBash(cmd, 'fork'), cmd).toBeDefined()
+    }
+    for (const cmd of ['gh api repos/me/x', 'gh pr view 3', 'gh pr list', 'gh repo view']) expect(judgeBash(cmd, 'fork'), cmd).toBeUndefined()
+
+    expect(judgeForkBash('sed -i s/a/b/ /r/src/a.ts', fork)).toBeDefined()
+    expect(judgeForkBash('cd /r/.claude/worktrees/q-x/../../.. && make', fork)).toBeDefined()
+    expect(judgeForkBash('sed -i s/a/b/ /r/.claude/worktrees/q-x/src/a.ts && cat /tmp/x', fork)).toBeUndefined()
+    expect(judgeForkBash('cd /r && git merge q/x', { ...fork, canMerge: true })).toBeUndefined()
   })
 
   test('control messages and fork markers round-trip', () => {
@@ -427,10 +460,13 @@ describe('the mod', () => {
     await ui.unmount()
   })
 
-  const gitAnswers = (isBranchMerged: boolean) => ($: unknown, e: { argv: readonly string[] }) => {
+  /** git beneath the mod: a repository at /repo whose fork branch is (or isn't) merged, with `commits` of its own. */
+  const gitAnswers = (isBranchMerged: boolean, commits = 1, ran: string[] = []) => ($: unknown, e: { argv: readonly string[] }) => {
     const args = e.argv.join(' ')
+    ran.push(args)
     const out = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '' } }) as never
     if (args.includes('--show-toplevel')) return out('/repo\n')
+    if (args.includes('rev-list --count')) return out(`${commits}\n`)
     if (args.includes('--abbrev-ref')) return out('main\n')
     if (args.includes('--git-common-dir')) return out('/repo/.git\n')
     if (args.includes('merge-base --is-ancestor')) return out('', isBranchMerged ? 0 : 1)
@@ -439,10 +475,11 @@ describe('the mod', () => {
     return out('')
   }
 
-  test('a fork whose subagent never started fails, and its task goes back in the queue', async ($, on) => {
+  test('a fork whose subagent never started fails, its task goes back in the queue, and nothing is left behind', async ($, on) => {
     mock.clock(on)
     mock.store(on)
-    on('process.run', gitAnswers(true))
+    const ran: string[] = []
+    on('process.run', gitAnswers(true, 1, ran))
     on('fs.read', () => ({ value: '' }) as never)
     on('fs.write', () => ({ value: undefined }) as never)
     on('session.id', () => ({ value: 'main-session' }) as never)
@@ -458,14 +495,21 @@ describe('the mod', () => {
     const text = await listed($)
     expect(text).toContain('fork f2 [failed] (agent) add a cache')
     expect(text).toContain('#1 [queued] (you) add a cache')
+    expect(ran).toContain('git worktree remove --force /repo/.claude/worktrees/q-add-a-cache-f2')
+    expect(ran).toContain('git branch -D q/add-a-cache-f2')
   })
 
-  for (const isBranchMerged of [true, false]) {
-    test(`a merging fork that ends without reporting: ${isBranchMerged ? 'merged per git' : 'failed, queue paused'}`, async ($, on) => {
+  for (const [isBranchMerged, commits, label] of [
+    [true, 1, 'merged per git'],
+    [false, 1, 'failed, queue paused'],
+    [true, 0, 'no commits of its own: not merged, failed'],
+  ] as const) {
+    const isMerged = isBranchMerged && commits > 0
+    test(`a merging fork that ends without reporting: ${label}`, async ($, on) => {
       const clock = mock.clock(on)
       const fork = {
         id: 'f2', itemId: 'i1', text: 'add a cache', kind: 'agent', status: 'merging', token: 't',
-        branch: 'q/add-a-cache-f2', worktree: '/repo/.claude/worktrees/q-add-a-cache-f2', agentId: 'fork-agent',
+        branch: 'q/add-a-cache-f2', worktree: '/repo/.claude/worktrees/q-add-a-cache-f2', agentId: 'fork-agent', base: 'b0',
       }
       const saved = {
         ...EMPTY, seq: 2, mergeHolder: 'f2', forks: [fork],
@@ -473,7 +517,7 @@ describe('the mod', () => {
       }
       mock.store(on, { 'session:main-session': saved })
       const appended = mock.session(on)
-      on('process.run', gitAnswers(isBranchMerged))
+      on('process.run', gitAnswers(isBranchMerged, commits))
       on('session.id', () => ({ value: 'main-session' }) as never)
       on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
       on('turn.complete', ($, e) => ({ text: e.answer }) as never)
@@ -483,7 +527,7 @@ describe('the mod', () => {
       await clock.advance(10)
 
       const text = await listed($)
-      if (isBranchMerged) {
+      if (isMerged) {
         expect(text).toContain('fork f2 [merged]')
         expect(text).toStartWith('Queue idle.')
         expect(JSON.stringify(appended.appended())).toContain('merged q/add-a-cache-f2 into main (d14c2d7)')
@@ -618,8 +662,9 @@ describe('the mod', () => {
     expect(text).not.toContain('fork f2')
     expect(text).toContain('#2 [queued] (you) task f2')
 
-    // Clear finished: the merged fork goes, its branch removed only if merged (-d).
+    // Clear finished: the merged fork goes, its worktree only if clean and its branch only if merged.
     await key('c')
+    expect(ran).toContain('git worktree remove /repo/.claude/worktrees/q-task-f3')
     expect(ran).toContain('git branch -d q/task-f3')
     text = await listed($)
     expect(text).not.toContain('fork f3')
@@ -631,6 +676,204 @@ describe('the mod', () => {
     expect(await listed($)).toContain('fork f4 [merging]')
     expect(ran.slice(before).some(c => c.includes('f4'))).toBe(false)
     await ui.unmount()
+  })
+
+  /** A session fork holding the merge lock, saved before this session started. */
+  const mergingSessionFork = {
+    id: 'f2', itemId: 'i1', text: 'add a cache', kind: 'session', status: 'merging', token: 't',
+    branch: 'q/add-a-cache-f2', worktree: '/repo/.claude/worktrees/q-add-a-cache-f2', sessionId: 'fork-session', base: 'b0',
+  }
+  const withMergingFork = { ...EMPTY, seq: 2, mergeHolder: 'f2', forks: [mergingSessionFork], items: [{ id: 'i1', text: 'add a cache', source: 'you', status: 'forked', rootId: 'i1' }] }
+
+  test('a session fork that dies while merging frees the queue: checked every five minutes while it works', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on, { 'session:main-session': withMergingFork })
+    let sessions = '[{"id":"ab12","sessionId":"fork-session","status":"busy"}]'
+    on('process.run', ($, e) => {
+      if (e.argv.join(' ').includes('agents --json')) return { value: { exitCode: 0, stdout: sessions, stderr: '' } } as never
+
+      return gitAnswers(false)($, e)
+    })
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    // Still busy merging: left alone, and checked again later.
+    await clock.advance(5 * 60_000 + 10)
+    expect(await listed($)).toContain('fork f2 [merging]')
+
+    // Gone without a report, and its branch not merged: the lock is released and the queue says why.
+    sessions = '[]'
+    await clock.advance(5 * 60_000 + 10)
+    const text = await listed($)
+    expect(text).toContain('fork f2 [failed]')
+    expect(text).toStartWith('Queue paused: Merging "add a cache" failed: the fork stopped without reporting the merge')
+  })
+
+  test('p checks a stuck merge at once', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on, { 'session:main-session': withMergingFork })
+    on('process.run', ($, e) => {
+      if (e.argv.join(' ').includes('agents --json')) return { value: { exitCode: 0, stdout: '[]', stderr: '' } } as never
+
+      return gitAnswers(false)($, e)
+    })
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    await ui.press({ key: 'pause' })
+    await ui.unmount()
+    await clock.advance(10)
+    expect(await listed($)).toContain('fork f2 [failed]')
+  })
+
+  test("a fork's own subagents are held to the fork's rules", async ($, on) => {
+    mock.clock(on)
+    const fork = {
+      id: 'f2', itemId: 'i1', text: 'add a cache', kind: 'agent', status: 'working', token: 't',
+      branch: 'q/add-a-cache-f2', worktree: '/repo/.claude/worktrees/q-add-a-cache-f2', agentId: 'fork-agent', base: 'b0',
+    }
+    mock.store(on, { 'session:main-session': { ...EMPTY, seq: 2, forks: [fork], items: [{ id: 'i1', text: 'add a cache', source: 'you', status: 'forked', rootId: 'i1' }] } })
+    on('process.run', gitAnswers(false))
+    on('agent.list', () => ({
+      value: [
+        { id: 'fork-agent', description: 'q: add a cache', type: 'fork', status: 'running' },
+        { id: 'helper', parentId: 'fork-agent', description: 'look around', type: 'general-purpose', status: 'running' },
+      ],
+    }) as never)
+    on('tool.call', { tool: 'Edit' }, () => ({ result: 'edited', text: 'edited' }) as never)
+    on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }) as never)
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    const call = (input: object) => $.tool.call(input as never) as Promise<{ deny?: string }>
+    const edit = (file_path: string, agentId?: string) => call({ tool: 'Edit', file_path, old_string: 'a', new_string: 'b', agentId })
+
+    expect((await edit('/repo/src/a.ts', 'helper')).deny).toMatch(/main checkout/)
+    expect((await edit('/repo/.claude/worktrees/q-add-a-cache-f2/src/a.ts', 'helper')).deny).toBeUndefined()
+    expect((await call({ tool: 'Bash', command: 'git push', agentId: 'helper' })).deny).toMatch(/queue fork/)
+    expect((await call({ tool: 'Bash', command: 'sed -i s/a/b/ /repo/src/a.ts', agentId: 'helper' })).deny).toMatch(/main checkout/)
+    // The main session is not a fork.
+    expect((await edit('/repo/src/a.ts')).deny).toBeUndefined()
+  })
+
+  test('a ready fork being deleted is never granted the merge meanwhile', async ($, on) => {
+    const clock = mock.clock(on)
+    const fork = {
+      id: 'f1', itemId: 'i1', text: 'add a cache', kind: 'agent', status: 'ready', readyAt: 1, token: 't',
+      branch: 'q/add-a-cache-f1', worktree: '/repo/.claude/worktrees/q-add-a-cache-f1', agentId: 'fork-agent', base: 'b0',
+    }
+    mock.store(on, { 'session:main-session': { ...EMPTY, seq: 1, forks: [fork], items: [{ id: 'i1', text: 'add a cache', source: 'you', status: 'forked', rootId: 'i1' }] } })
+    on('process.run', gitAnswers(false))
+    const sent: unknown[] = []
+    on('session.send', ($, e) => {
+      sent.push(e)
+
+      return { value: { isDelivered: true } } as never
+    })
+    // Stopping the fork takes a while: until the test lets it finish.
+    let finish!: () => void
+    const stopping = new Promise<void>(resolve => (finish = resolve))
+    on('tool.call', { tool: 'TaskStop' }, async () => {
+      await stopping
+
+      return { result: 'stopped' } as never
+    })
+    on('turn.complete', ($, e) => ({ text: e.answer }) as never)
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    const deleting = ui.key({ key: 'd', in: 'list' })
+    await clock.settle()
+    // A turn ends meanwhile, and the queue looks for a merge to grant.
+    await $.turn.complete({ turnId: 'tx', reason: 'answer', answer: '', durationMs: 1, isAborted: false } as never)
+    await clock.advance(10)
+    expect(await listed($)).toContain('fork f1 [retiring]')
+    expect(JSON.stringify(sent)).not.toContain('merge-go')
+
+    finish()
+    await deleting
+    await ui.advance(16)
+    await clock.advance(10)
+    await ui.unmount()
+    expect(await listed($)).not.toContain('fork f1')
+    expect(JSON.stringify(sent)).not.toContain('merge-go')
+  })
+
+  test("saved queues are pruned by when they were last saved, never this session's own", async ($, on) => {
+    mock.clock(on, { now: 1_000_000 })
+    const disk: Record<string, unknown> = { 'session:main-session': { ...EMPTY, savedAt: 1 } }
+    // s0 was created first but saved most recently; s1 and s2 are the stalest of the rest.
+    for (let n = 0; n < 31; n++) disk[`session:s${n}`] = { ...EMPTY, savedAt: n === 0 ? 999_999 : 100 + n }
+    on('store.get', ($, e) => ({ value: disk[e.key] }) as never)
+    on('store.set', ($, e) => {
+      disk[e.key] = e.value
+
+      return { value: undefined } as never
+    })
+    on('store.delete', ($, e) => {
+      delete disk[e.key]
+
+      return { value: undefined } as never
+    })
+    on('store.keys', () => ({ value: Object.keys(disk) }) as never)
+    on('process.run', () => ({ value: { exitCode: 128, stdout: '', stderr: 'not a git repository' } }) as never)
+    on('session.id', () => ({ value: 'main-session' }) as never)
+    on('session.start', ($, e) => ({ cwd: e.cwd }) as never)
+    await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+
+    const left = Object.keys(disk).filter(k => k.startsWith('session:'))
+    expect(left.length).toBe(30)
+    expect(left).toContain('session:main-session')
+    expect(left).toContain('session:s0')
+    expect(left).not.toContain('session:s1')
+    expect(left).not.toContain('session:s2')
+  })
+
+  test('a dirty checkout pauses the queue each time it starts again, not only the first time', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    on('process.run', ($, e) => {
+      const args = e.argv.join(' ')
+      const stdout = args.includes('--show-toplevel') ? '/repo\n' : args.includes('status --porcelain') ? ' M src/a.ts\n' : ''
+
+      return { value: { exitCode: 0, stdout, stderr: '' } } as never
+    })
+    const sent: string[] = []
+    on('prompt.submit', ($, e) => {
+      sent.push(e.text)
+
+      return { text: e.text }
+    })
+    on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+    on('turn.complete', (_, e) => ({ text: e.answer }) as never)
+    const paused = 'Queue paused: Your checkout has uncommitted changes'
+
+    await runQ($, 'task one')
+    await clock.advance(10)
+    expect(await listed($)).toStartWith(paused)
+
+    // Start anyway: the task runs and finishes, and the queue is empty again.
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    await ui.press({ key: 'pause' })
+    await ui.unmount()
+    await clock.advance(10)
+    expect(sent.length).toBe(1)
+    await $.turn.start({ text: sent[0], turnId: 't1' } as never)
+    await $.turn.complete({ answer: 'done', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    await clock.advance(10)
+    expect(await listed($)).toContain('[done] (you) task one')
+
+    // The next task starts the queue again, so the checkout is checked again.
+    await runQ($, 'task two')
+    await clock.advance(10)
+    expect(await listed($)).toStartWith(paused)
+    expect(sent.length).toBe(1)
   })
 
   test('docked, the list fills the pane; with nothing queued the field does, and the buttons carry the keys', async ($, on) => {

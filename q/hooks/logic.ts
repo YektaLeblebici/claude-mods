@@ -238,14 +238,22 @@ const SEGMENT = '[^;&|\\n]*'
 const DESTRUCTIVE: [RegExp, string][] = [
   [new RegExp(`\\bgit\\b${SEGMENT}\\breset\\b${SEGMENT}--hard`), 'git reset --hard'],
   [new RegExp(`\\bgit\\b${SEGMENT}\\bcheckout\\b${SEGMENT}\\s(--(\\s|$)|\\.(\\s|$))`), 'git checkout -- / .'],
-  [new RegExp(`\\bgit\\b${SEGMENT}\\brestore\\b(?!${SEGMENT}--staged)`), 'git restore'],
+  // `git restore` discards working-tree changes unless it only unstages (--staged / -S without --worktree / -W).
+  [new RegExp(`\\bgit\\b${SEGMENT}\\brestore\\b(?!${SEGMENT}(--staged|\\s-[a-zA-Z]*S))`), 'git restore'],
+  [new RegExp(`\\bgit\\b${SEGMENT}\\brestore\\b${SEGMENT}(--worktree|\\s-[a-zA-Z]*W)`), 'git restore --worktree'],
   [new RegExp(`\\bgit\\b${SEGMENT}\\bclean\\b${SEGMENT}\\s-[a-zA-Z]*f`), 'git clean -f'],
   [new RegExp(`\\bgit\\b${SEGMENT}\\bstash\\s+(drop|clear)\\b`), 'git stash drop/clear'],
 ]
 
+/** What changes things outside this machine: GitHub as much as the remote. */
 const OUTWARD: [RegExp, string][] = [
   [new RegExp(`\\bgit\\b${SEGMENT}\\bpush\\b`), 'git push'],
   [/\bgh\s+pr\s+create\b/, 'gh pr create'],
+  [/\bgh\s+(pr|issue)\s+(merge|close|reopen|comment|review|edit|delete|lock|transfer|create)\b/, 'gh pr/issue changes'],
+  [/\bgh\s+release\s+(create|delete|edit|upload)\b/, 'gh release'],
+  [/\bgh\s+repo\s+(create|delete|edit|rename|archive|unarchive|sync|fork)\b/, 'gh repo changes'],
+  // gh api writes with an explicit method, or with fields or input (which make it a POST).
+  [new RegExp(`\\bgh\\s+api\\b${SEGMENT}(\\s(-X|--method)[\\s=]*(POST|PUT|PATCH|DELETE)\\b|\\s(-f|-F|--field|--raw-field|--input)\\b)`, 'i'), 'gh api writes'],
 ]
 
 /**
@@ -271,23 +279,51 @@ export function judgeBash(command: string, where: 'main' | 'claude-task' | 'fork
   return undefined
 }
 
+/** A path with `.`, `..` and repeated slashes resolved, so `<worktree>/../..` is judged where it lands. */
+export function normalizePath(path: string): string {
+  const isAbsolute = path.startsWith('/')
+  const parts: string[] = []
+  for (const part of path.split('/')) {
+    if (part === '' || part === '.') continue
+    if (part === '..') {
+      if (parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop()
+      else if (!isAbsolute) parts.push('..')
+    } else parts.push(part)
+  }
+
+  return (isAbsolute ? '/' : '') + parts.join('/')
+}
+
 function isUnder(path: string, dir: string): boolean {
-  const base = dir.replace(/\/+$/, '')
+  const base = normalizePath(dir)
 
   return path === base || path.startsWith(base + '/')
 }
 
+type ForkPlace = { worktree?: string; mainCheckout: string; canMerge: boolean }
+
 /** Why a fork may not write `path`, or undefined. */
-export function judgeForkPath(
-  path: string,
-  fork: { worktree?: string; mainCheckout: string; canMerge: boolean },
-): string | undefined {
+export function judgeForkPath(raw: string, fork: ForkPlace): string | undefined {
+  const path = normalizePath(raw)
   if (fork.worktree && isUnder(path, fork.worktree)) return undefined
   if (fork.canMerge || !isUnder(path, fork.mainCheckout)) return undefined
 
   const where = fork.worktree ? ` Work in your worktree, ${fork.worktree}.` : ''
 
   return `q: ${path} is in the main checkout, which a fork may only touch while it holds the merge lock.${where}`
+}
+
+/**
+ * Why a fork may not run `command`, for naming a path in the main checkout outside its worktree,
+ * or undefined. Best effort: it reads the absolute paths the command spells out, not `cd ..` hops.
+ */
+export function judgeForkBash(command: string, fork: ForkPlace): string | undefined {
+  for (const [token] of command.matchAll(/\/[^\s'"`;&|<>()]*/g)) {
+    const deny = judgeForkPath(token, fork)
+    if (deny) return deny
+  }
+
+  return undefined
 }
 
 // ── Texts ───────────────────────────────────────────────────────────────────

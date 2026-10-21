@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, Timer } from 'claude-code'
 
 import type { QData, QFork, QForkKind, QItem, QPause } from '../types'
 import type { ListRow, ListTone } from './list'
@@ -18,6 +18,7 @@ import {
   itemPrompt,
   itemTag,
   judgeBash,
+  judgeForkBash,
   judgeForkPath,
   mergeGoText,
   cursorForkOf,
@@ -72,7 +73,8 @@ async function mutate($: $, change: (d: QData) => QData): Promise<QData> {
 
 async function persist($: $, d: QData): Promise<void> {
   try {
-    await $.store.set(`session:${await $.session.id()}`, d)
+    const savedAt = await $.clock.now().catch(() => 0)
+    await $.store.set(`session:${await $.session.id()}`, { ...d, savedAt })
   } catch {
     // The queue still works for this session without a saved copy.
   }
@@ -96,8 +98,14 @@ async function restore($: $): Promise<void> {
     }))
   }
 
-  const keys = (await $.store.keys()).filter(k => k.startsWith('session:'))
-  for (const key of keys.slice(0, Math.max(0, keys.length - 30))) await $.store.delete(key)
+  // Keep the 30 most recently saved queues, this session's always among them.
+  const own = `session:${sid}`
+  const others = (await $.store.keys()).filter(k => k.startsWith('session:') && k !== own)
+  const ages = await Promise.all(
+    others.map(async key => ({ key, savedAt: ((await $.store.get(key)) as QData | undefined)?.savedAt ?? 0 })),
+  )
+  ages.sort((a, b) => a.savedAt - b.savedAt)
+  for (const { key } of ages.slice(0, Math.max(0, ages.length - 29))) await $.store.delete(key)
 }
 
 // ── Git ─────────────────────────────────────────────────────────────────────
@@ -164,7 +172,12 @@ async function pump($: $): Promise<void> {
 
   const ready = nextReadyFork(d)
   if (ready) return grantMerge($, ready.id)
-  if (!nextQueued(d)) return
+  if (!nextQueued(d)) {
+    // The queue ran dry: when it starts again, the checkout is checked again.
+    if (d.isDirtyAcked) await mutate($, x => (nextQueued(x) ? x : { ...x, isDirtyAcked: false }))
+
+    return
+  }
 
   const root = await repoRoot($)
   if (root && !d.isDirtyAcked) {
@@ -351,6 +364,9 @@ async function togglePause($: $): Promise<void> {
 
     return resumed
   })
+  // A merge holding the queue is checked at once: p is the way out of one whose fork is gone.
+  const { mergeHolder } = await read($, data)
+  if (mergeHolder) later($, () => checkMerge($, mergeHolder))
   later($, () => pump($))
 }
 
@@ -428,6 +444,8 @@ async function startFork($: $, itemId: string, kind: QForkKind): Promise<void> {
   if (!made) return
 
   const slug = `${slugOf(made.text)}-${made.id}`
+  const head = await git($, ['rev-parse', 'HEAD'], root)
+  const base = head.exitCode === 0 ? head.stdout.trim() : undefined
   const parentSessionId = await $.session.id()
   const mainBranch = await branchOf($, root)
   await excludeWorktrees($, root)
@@ -439,6 +457,12 @@ async function startFork($: $, itemId: string, kind: QForkKind): Promise<void> {
     if (added.exitCode !== 0) return failFork($, made, added.stderr.trim() || 'git worktree add failed', true)
 
     const withPlace = { ...made, branch, worktree }
+    // A fork that never got going leaves no worktree or branch behind.
+    const giveUp = async (why: string) => {
+      await cleanUpFork($, withPlace, true)
+
+      return failFork($, withPlace, why, true)
+    }
     let spawned: Awaited<ReturnType<typeof $.agent.spawn>>
     try {
       spawned = await $.agent.spawn({
@@ -448,12 +472,12 @@ async function startFork($: $, itemId: string, kind: QForkKind): Promise<void> {
         prompt: forkPrompt({ fork: withPlace, parentSessionId, mainCheckout: root, mainBranch, worktree, others }),
       })
     } catch (err) {
-      return failFork($, withPlace, `the subagent did not start: ${String(err)}`, true)
+      return giveUp(`the subagent did not start: ${String(err)}`)
     }
-    if (spawned.deny !== undefined) return failFork($, withPlace, spawned.deny, true)
-    if (!spawned.agentId) return failFork($, withPlace, 'the subagent did not start', true)
+    if (spawned.deny !== undefined) return giveUp(spawned.deny)
+    if (!spawned.agentId) return giveUp('the subagent did not start')
 
-    await mutate($, d => setFork(d, made.id, { branch, worktree, agentId: spawned.agentId, status: 'working' }))
+    await mutate($, d => setFork(d, made.id, { branch, worktree, base, agentId: spawned.agentId, status: 'working' }))
   } else {
     const prompt = forkPrompt({ fork: made, parentSessionId, mainCheckout: root, mainBranch, others })
     const argv = [
@@ -474,9 +498,11 @@ async function startFork($: $, itemId: string, kind: QForkKind): Promise<void> {
     ]
     const started = await $.process.run(argv, { cwd: root, timeoutMs: 120_000 })
     if (started.exitCode !== 0) {
+      await cleanUpFork($, made, true)
+
       return failFork($, made, (started.stderr || started.stdout).trim().slice(0, 300) || 'claude --bg failed', true)
     }
-    await mutate($, d => setFork(d, made.id, { status: 'working', note: started.stdout.trim().slice(0, 200) }))
+    await mutate($, d => setFork(d, made.id, { base, status: 'working', note: started.stdout.trim().slice(0, 200) }))
   }
 
   $.ui.toast(`q: forked "${made.text.slice(0, 40)}" (${kind})`)
@@ -513,13 +539,69 @@ async function grantMerge($: $, forkId: string): Promise<void> {
 
     return
   }
+  watchMerge($, forkId)
   $.ui.toast(`q: merging "${granted.text.slice(0, 40)}"; the queue waits for it`)
+}
+
+/** How long a merge may go without its report before git and the fork are checked. */
+const MERGE_CHECK_MS = 5 * 60_000
+// The one merge being watched (the queue grants one at a time). Module state: session.start watches
+// again after a reload.
+let mergeWatch: Timer | null = null
+
+function watchMerge($: $, forkId: string): void {
+  mergeWatch?.cancel()
+  mergeWatch = $.clock.after(MERGE_CHECK_MS, () => {
+    checkMerge($, forkId).catch(err => $.ui.log(`q: ${String(err)}`, { to: 'debug' }))
+  })
+}
+
+/**
+ * The backstop for a merge whose report never comes (the fork crashed, was closed or ran out of
+ * usage). Git says whether it merged; if not, a fork no longer at work gives the lock back and the
+ * queue pauses. A fork still at work is checked again later.
+ */
+async function checkMerge($: $, forkId: string): Promise<void> {
+  const d = await read($, data)
+  const fork = d.forks.find(f => f.id === forkId)
+  if (!fork || fork.status !== 'merging' || d.mergeHolder !== forkId) return
+
+  const sha = await mergedSha($, fork)
+  if (sha) return finishMerge($, forkId, true, sha)
+  if (await isForkAtWork($, fork)) return watchMerge($, forkId)
+
+  return finishMerge($, forkId, false, `the fork stopped without reporting the merge, and ${fork.branch ?? 'its branch'} is not in the main checkout`)
+}
+
+/** Whether a fork is still working: its subagent live, or its background session busy. */
+async function isForkAtWork($: $, fork: QFork): Promise<boolean> {
+  if (fork.kind === 'agent') return fork.agentId !== undefined && isAgentLive($, fork.agentId)
+  const session = (await sessionsNow($)).find(x => x.sessionId === fork.sessionId)
+
+  return session?.status === 'busy'
+}
+
+/** The Claude Code sessions running on this machine, as `claude agents --json` lists them. */
+async function sessionsNow($: $): Promise<{ id?: unknown; sessionId?: unknown; status?: unknown }[]> {
+  const listed = await $.process
+    .run(['env', ...SCRUB.flatMap(name => ['-u', name]), 'claude', 'agents', '--json'], { timeoutMs: 30_000 })
+    .catch(() => undefined)
+  try {
+    return listed?.exitCode === 0 ? JSON.parse(listed.stdout) : []
+  } catch {
+    return []
+  }
 }
 
 /** The main checkout's commit when the fork's branch is merged into it, else null. */
 async function mergedSha($: $, fork: QFork): Promise<string | null> {
   const root = await repoRoot($)
-  if (!root || !fork.branch) return null
+  // A branch with no commits of its own is always "in" HEAD: only a fork's own commits count, and
+  // without its starting commit nothing can show they exist.
+  if (!root || !fork.branch || !fork.base) return null
+
+  const added = await git($, ['rev-list', '--count', `${fork.base}..${fork.branch}`], root)
+  if (added.exitCode !== 0 || !(Number(added.stdout.trim()) > 0)) return null
 
   const isIn = await git($, ['merge-base', '--is-ancestor', fork.branch, 'HEAD'], root)
   if (isIn.exitCode !== 0) return null
@@ -534,6 +616,8 @@ async function finishMerge($: $, forkId: string, ok: boolean, detail: string): P
   const fork = before.forks.find(f => f.id === forkId)
   if (!fork || fork.status !== 'merging') return
 
+  mergeWatch?.cancel()
+  mergeWatch = null
   await mutate($, d => {
     const x = { ...setFork(d, forkId, { status: ok ? 'merged' : 'failed', note: detail }), mergeHolder: null }
 
@@ -574,6 +658,30 @@ function forkOfAgent(d: QData, agentId: string | undefined): QFork | undefined {
   return agentId === undefined ? undefined : d.forks.find(f => f.agentId === agentId)
 }
 
+/** The fork an agent's loop works for: the fork's own subagent, or one it started, at any depth. */
+async function forkOfLoop($: $, d: QData, agentId: string | undefined): Promise<QFork | undefined> {
+  const direct = forkOfAgent(d, agentId)
+  if (direct || agentId === undefined || !d.forks.some(f => f.agentId)) return direct
+
+  const agents = await agentsNow($)
+  let id: string | undefined = agentId
+  for (let hops = 0; id !== undefined && hops < 10; hops++) {
+    id = agents.find(a => a.id === id)?.parentId
+    const fork = forkOfAgent(d, id)
+    if (fork) return fork
+  }
+
+  return undefined
+}
+
+/** Where a fork may write, for the loop making a call: a fork session's role, or an agent fork's place. */
+async function forkPlace($: $, d: QData, agentId: string | undefined) {
+  const agentFork = await forkOfLoop($, d, agentId)
+  if (agentFork) return { worktree: agentFork.worktree, mainCheckout: (await repoRoot($)) ?? '', canMerge: agentFork.status === 'merging' }
+
+  return d.role
+}
+
 // ── Managing forks ──────────────────────────────────────────────────────────
 
 const RUNNING_FORK: QFork['status'][] = ['starting', 'working', 'ready']
@@ -595,16 +703,7 @@ async function stopFork($: $, fork: QFork): Promise<string | undefined> {
 
   // A session fork: find its background session by the id it reported.
   if (!fork.sessionId) return 'its session never reported in, so it may still be running'
-  const listed = await $.process.run(['env', ...SCRUB.flatMap(name => ['-u', name]), 'claude', 'agents', '--json'], {
-    timeoutMs: 30_000,
-  }).catch(() => undefined)
-  let sessions: { id?: unknown; sessionId?: unknown }[] = []
-  try {
-    sessions = listed?.exitCode === 0 ? JSON.parse(listed.stdout) : []
-  } catch {
-    sessions = []
-  }
-  const session = sessions.find(x => x.sessionId === fork.sessionId)
+  const session = (await sessionsNow($)).find(x => x.sessionId === fork.sessionId)
   if (!session) return undefined
   const stopped = await $.process
     .run(['env', ...SCRUB.flatMap(name => ['-u', name]), 'claude', 'stop', String(session.id)], { timeoutMs: 30_000 })
@@ -614,8 +713,9 @@ async function stopFork($: $, fork: QFork): Promise<string | undefined> {
 }
 
 /**
- * Removes a fork's worktree and branch. `force` deletes the branch whatever it
- * holds; without it, git keeps a branch that is not merged. Says what was left.
+ * Removes a fork's worktree and branch. `force` deletes both whatever they
+ * hold; without it, git keeps a worktree with changes in it and a branch that
+ * is not merged. Says what was left.
  */
 async function cleanUpFork($: $, fork: QFork, force: boolean): Promise<string[]> {
   const root = await repoRoot($)
@@ -636,7 +736,7 @@ async function cleanUpFork($: $, fork: QFork, force: boolean): Promise<string[]>
 
   const left: string[] = []
   if (worktree) {
-    const removed = await git($, ['worktree', 'remove', '--force', worktree], root)
+    const removed = await git($, ['worktree', 'remove', ...(force ? ['--force'] : []), worktree], root)
     if (removed.exitCode !== 0 && !/is not a working tree/.test(removed.stderr)) left.push(`worktree ${worktree}`)
   }
   await git($, ['worktree', 'prune'], root)
@@ -650,28 +750,45 @@ async function cleanUpFork($: $, fork: QFork, force: boolean): Promise<string[]>
 
 /** Delete (`drop`) or send back a fork: stop it, remove its worktree and branch, take it off the list. */
 async function retireFork($: $, forkId: string, outcome: 'drop' | 'send-back'): Promise<void> {
-  const d = await read($, data)
-  const fork = d.forks.find(f => f.id === forkId)
-  if (!fork) return
-  if (fork.status === 'merging' || d.mergeHolder === forkId) {
-    $.ui.toast('q: that fork is merging into your checkout; stopping it now could leave a half-done merge. Wait for it.')
+  // Checked and marked in one step, before anything slow: a retiring fork can no longer be granted
+  // the merge lock (only a ready one can), so it can't start merging while it is being taken apart.
+  let fork: QFork | undefined
+  let refusal: string | undefined
+  await mutate($, d => {
+    fork = undefined
+    refusal = undefined
+    const f = d.forks.find(x => x.id === forkId)
+    if (!f || f.status === 'retiring') return d
+    if (f.status === 'merging' || d.mergeHolder === forkId) {
+      refusal = 'q: that fork is merging into your checkout; stopping it now could leave a half-done merge. Wait for it.'
+
+      return d
+    }
+    if (outcome === 'send-back' && f.status === 'merged') {
+      refusal = 'q: that fork is already merged; nothing to send back'
+
+      return d
+    }
+    fork = f
+
+    return setFork(d, forkId, { status: 'retiring' })
+  })
+  if (refusal) {
+    $.ui.toast(refusal)
 
     return
   }
-  if (outcome === 'send-back' && fork.status === 'merged') {
-    $.ui.toast('q: that fork is already merged; nothing to send back')
+  const was = fork as QFork | undefined
+  if (!was) return
 
-    return
-  }
-
-  const problem = await stopFork($, fork)
-  const left = await cleanUpFork($, fork, true)
+  const problem = await stopFork($, was)
+  const left = await cleanUpFork($, was, true)
   await mutate($, x => removeFork(x, forkId, outcome))
   if (outcome === 'send-back') later($, () => pump($))
 
   const done = outcome === 'drop' ? 'deleted' : 'sent back to the queue'
   const leftover = [problem, left.length ? `left behind: ${left.join(', ')}` : undefined].filter(Boolean).join('; ')
-  $.ui.toast(`q: fork "${fork.text.slice(0, 40)}" ${done}${leftover ? ` (${leftover})` : ''}`)
+  $.ui.toast(`q: fork "${was.text.slice(0, 40)}" ${done}${leftover ? ` (${leftover})` : ''}`)
 }
 
 /** Clears done tasks and merged forks, removing each merged fork's worktree and branch. */
@@ -774,6 +891,9 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     await restore($)
+    // A merge granted before a reload is watched again: the timer did not survive it.
+    const { mergeHolder } = await read($, data)
+    if (mergeHolder) watchMerge($, mergeHolder)
 
     await $.command.register({
       name: 'q',
@@ -1053,8 +1173,13 @@ export const register: Register = on => {
         }),
       )
     } else if (control.kind === 'ready') {
+      // Only a fork still at work becomes ready: one being retired stays out of the merge queue.
       const now = await $.clock.now()
-      await mutate($, x => setFork(x, fork.id, { status: 'ready', readyAt: now, note: String(control.summary ?? '') }))
+      await mutate($, x =>
+        ['starting', 'working'].includes(x.forks.find(f => f.id === fork.id)?.status ?? '')
+          ? setFork(x, fork.id, { status: 'ready', readyAt: now, note: String(control.summary ?? '') })
+          : x,
+      )
       later($, () => pump($))
     } else if (control.kind === 'merged') {
       later($, () => finishMerge($, fork.id, control.ok === true, String(control.ok === true ? control.sha : control.reason)))
@@ -1109,7 +1234,11 @@ export const register: Register = on => {
     const fork = forkOfAgent(d, e.agentId)
     if (fork) {
       const now = await $.clock.now()
-      await mutate($, x => setFork(x, fork.id, { status: 'ready', readyAt: now, note: summary }))
+      await mutate($, x =>
+        ['starting', 'working'].includes(x.forks.find(f => f.id === fork.id)?.status ?? '')
+          ? setFork(x, fork.id, { status: 'ready', readyAt: now, note: summary })
+          : x,
+      )
 
       return { result: 'Reported ready. End your turn now; you will get a message when you may merge.' }
     }
@@ -1137,12 +1266,16 @@ export const register: Register = on => {
   // ── Guards ──
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const d = await read($, data)
-    const isFork = d.role !== null || forkOfAgent(d, e.agentId) !== undefined
+    // A fork's subagents count as the fork: their calls carry their own agentId.
+    const place = await forkPlace($, d, e.agentId)
+    const isFork = place !== null
     const isActive =
       !d.paused && (d.runningId !== null || d.forks.some(f => ['starting', 'working', 'ready', 'merging'].includes(f.status)))
     const running = d.items.find(i => i.id === d.runningId)
     const where = isFork ? 'fork' : running?.source === 'claude' ? 'claude-task' : 'main'
-    const deny = isFork || isActive ? judgeBash(e.command, where) : undefined
+    const deny =
+      (isFork || isActive ? judgeBash(e.command, where) : undefined) ??
+      (place?.mainCheckout ? judgeForkBash(e.command, place) : undefined)
 
     return deny ? { deny } : next(e)
   }).catch(($, e, next) => (next.called ? next(e) : { deny: 'q: its guard failed; pause the queue (p in /q) to run this.' }))
@@ -1151,14 +1284,7 @@ export const register: Register = on => {
     if (e.tool !== 'Edit' && e.tool !== 'Write' && e.tool !== 'NotebookEdit') return next(e)
 
     const d = await read($, data)
-    const agentFork = forkOfAgent(d, e.agentId)
-    const fork = agentFork
-      ? {
-          worktree: agentFork.worktree,
-          mainCheckout: (await repoRoot($)) ?? '',
-          canMerge: agentFork.status === 'merging',
-        }
-      : d.role
+    const fork = await forkPlace($, d, e.agentId)
     if (!fork || !fork.mainCheckout) return next(e)
 
     const path = e.tool === 'NotebookEdit' ? e.notebook_path : e.file_path

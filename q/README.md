@@ -130,7 +130,11 @@ on that one task in its own worktree under `.claude/worktrees/`, on a branch
 4. The main session gets a note that files may have changed.
 
 If a fork's report goes missing, the queue asks git whether its branch is
-already merged before calling it failed.
+already merged before calling it failed; a branch counts as merged only if it
+has commits of its own. A merge that goes five minutes without a report is
+checked the same way: if the fork is no longer working (it crashed, was closed
+or ran out of usage), the lock is released and the queue pauses to say so.
+Pressing `p` checks at once.
 
 Managing forks in the pane:
 
@@ -138,6 +142,8 @@ Managing forks in the pane:
   — **unmerged commits included** — and drops its task.
 - `b` does the same clean-up but puts the task back at the front of the queue.
 - `c` clears merged forks only; failed forks stay until you handle each one.
+  A merged fork's worktree is removed only if it holds no uncommitted changes;
+  otherwise it is listed as left behind.
 - A fork that is merging into your checkout refuses `d` and `b`: stopping it
   there could leave a half-done merge.
 
@@ -167,11 +173,15 @@ a command, not every way a shell can spell it.
 - **Claude's tasks are marked.** They show as `claude` in the pane and reach
   Claude framed as its own suggestion, not as your words.
 - **Discarding work is blocked** while the queue works: `git reset --hard`,
-  `git checkout -- .`, `git clean -f`, `git restore`, `git stash drop`.
-- **Pushes and PRs** are allowed in tasks you queued, blocked in tasks Claude
-  queued itself, and always blocked in forks.
+  `git checkout -- .`, `git clean -f`, `git restore` (unstaging alone is fine),
+  `git stash drop`.
+- **Pushes and GitHub changes** are allowed in tasks you queued, blocked in
+  tasks Claude queued itself, and always blocked in forks: `git push`, changes
+  to pull requests and issues (create, merge, close, comment, …), releases,
+  repository settings, and `gh api` calls that write.
 - **Forks stay in their worktree.** A fork's edits to the main checkout are
-  refused until it holds the merge lock.
+  refused until it holds the merge lock, and so are its Bash commands that name
+  a path there. Subagents a fork starts are held to the same rules.
 - **Conversation-wiping commands** (`/clear`, `/exit`, `/resume`, `/rewind`, …)
   cannot be queued.
 

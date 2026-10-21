@@ -14,7 +14,8 @@ export type QItem = {
 
 export type QForkKind = 'session' | 'agent'
 
-export type QForkStatus = 'starting' | 'working' | 'ready' | 'merging' | 'merged' | 'failed'
+/** retiring: being deleted or sent back; it can no longer be granted the merge lock. */
+export type QForkStatus = 'starting' | 'working' | 'ready' | 'merging' | 'merged' | 'failed' | 'retiring'
 
 export type QFork = {
   id: string
@@ -26,6 +27,8 @@ export type QFork = {
   token: string
   branch?: string
   worktree?: string
+  /** The main checkout's commit the fork started from: only commits past it count as its work. */
+  base?: string
   agentId?: string
   sessionId?: string
   note?: string
@@ -76,6 +79,8 @@ export type QData = {
   isDefault: boolean
   role: QRole | null
   seq: number
+  /** When this copy was last saved (ms), in a saved copy: the stalest copies are pruned first. */
+  savedAt?: number
 }
 
 declare module 'claude-code' {
