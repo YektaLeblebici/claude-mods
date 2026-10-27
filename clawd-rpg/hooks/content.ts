@@ -300,6 +300,63 @@ export const BIOMES: Biome[] = [
     ambient: ['You hear your own footsteps, a second late.', 'A comet passes, waving.', 'You find a door standing in nothing. Locked.', 'The silence is very loud here.', 'Your shadow wanders off for a bit.', 'A star whispers your next commit message.'],
   },
   {
+    id: 'sprawl',
+    names: ['The Neon Sprawl', 'Rainlight Bazaar', 'The Stacks'],
+    descs: [
+      'Rain hisses on neon. Every wall is an advert, and every advert knows your name.',
+      'Noodle stalls and black-market chrome, three storeys deep under a sky of holograms.',
+      'Apartment blocks stacked like crates, strung together with cables and bad decisions.',
+    ],
+    enemies: [
+      { name: 'Chrome-Jaw Ganger', desc: 'More implant than manners.', hp: 1.1, atk: 1.1, def: 1.0, verbs: ['bites', 'pistol-whips'], tint: '#ff4081' },
+      { name: 'Street Netrunner', desc: 'Hacks your eyes. Now you see ads.', hp: 0.7, atk: 1.2, def: 0.7, verbs: ['short-circuits', 'jacks into'], tint: '#00e5ff' },
+      { name: 'Security Drone', desc: 'Rotor whine, red lens, zero patience.', hp: 0.7, atk: 1.0, def: 0.9, verbs: ['tasers', 'strafes'], tint: '#ffd600' },
+    ],
+    bosses: [
+      { name: 'Mama Voltage, Queen of the Sprawl', desc: 'Runs every gang from the Bazaar to the Stacks, from a throne of jumper cables.', hp: 1.2, atk: 1.1, def: 1.1, verbs: ['electrocutes', 'sends her crew at'], tint: '#e040fb', intro: 'Every streetlight flickers at once. Mama Voltage steps out of the rain, sparks dripping from her fingers.', defeat: 'Mama Voltage shorts out with a bang, and the whole Sprawl goes dark for one glorious second.' },
+      { name: 'Ghost of the Last Rockstar', desc: 'A dead rebel rocker living in a stolen chip, still angry at the corps.', hp: 1.0, atk: 1.3, def: 0.9, verbs: ['power-chords', 'screams a solo at'], tint: '#b0bec5', intro: 'Feedback howls from every speaker. A figure made of static tunes a guitar that is not there: "Let\'s burn something."', defeat: 'The Ghost laughs, salutes the sky with one finger, and fades back into the static.' },
+    ],
+    ambient: ['A holo-ad follows you down the street, whispering discounts.', 'Rain runs off the neon in pink and blue rivers.', 'A vending machine tries to start a conversation.', 'You buy noodles of uncertain origin. They are excellent.', 'Sirens wail three blocks over. Nobody looks up.', 'Your optics flash a warning: low credit, high danger.'],
+  },
+  {
+    id: 'helix',
+    names: ['Helix Tower', 'The Executive Floors', 'Server Vault Nine'],
+    descs: [
+      'A spear of black glass above the city. Even the receptionists are armed.',
+      'Carpets so thick they muffle gunfire, and art that costs more than districts.',
+      'Cold aisles of humming servers, and something in the network that hums back.',
+    ],
+    enemies: [
+      { name: 'Corp Security Mech', desc: 'Two tons of legal liability on legs.', hp: 1.4, atk: 1.1, def: 1.4, verbs: ['stomps', 'rockets'], tint: '#90a4ae' },
+      { name: 'Black ICE Daemon', desc: 'Security software that learned to want things.', hp: 0.8, atk: 1.3, def: 0.7, verbs: ['fries', 'traces'], tint: '#00e676' },
+      { name: 'Executive Assassin', desc: 'Tailored suit, razor wire, a smile that bills by the hour.', hp: 0.8, atk: 1.3, def: 0.8, verbs: ['slices', 'ambushes'], tint: '#eceff1' },
+    ],
+    bosses: [
+      { name: 'The Chrome Colossus', desc: 'A full-body cyborg enforcer: more machine than man, and proud of the ratio.', hp: 1.4, atk: 1.2, def: 1.2, verbs: ['crushes', 'unloads a cannon at'], tint: '#cfd8dc', intro: 'The floor shakes. The Chrome Colossus ducks under the doorframe and cracks its neck.', defeat: 'The Colossus topples like a dropped fridge, its red eyes dimming one at a time.' },
+      { name: 'Old Man Kurogane', desc: 'Helix\'s undying CEO, on his fourth heart and his second century.', hp: 1.1, atk: 1.1, def: 1.3, verbs: ['liquidates', 'downsizes'], tint: '#ffd54f', intro: 'The penthouse doors part. Old Man Kurogane does not stand up: "Do you have an appointment?"', defeat: 'Kurogane sighs, signs something, and his chair rolls him into a panic room.' },
+    ],
+    ambient: ['An elevator announces your floor, then your credit score.', 'Security cameras swivel to follow you, politely.', 'A poster reads LOYALTY IS FOREVER. The fine print says so is your contract.', 'Somewhere, a meeting about you is running long.', 'The air is filtered, perfumed and faintly disappointed.', 'A drone delivers coffee to an empty desk.'],
+  },
+  {
+    id: 'annex',
+    names: ['The Shifting Annex', 'Sublevel Null', 'The Containment Wing'],
+    descs: [
+      'A grey government building, far larger inside than out. The corridors are not where you left them.',
+      'Below the lowest floor. The lights hum a note you can feel in your teeth.',
+      'Steel doors, each with a number, each with something breathing behind it.',
+    ],
+    enemies: [
+      { name: 'Possessed Clerk', desc: 'Still filing reports, in a voice that is not his own. The reports are about you.', hp: 1.0, atk: 1.1, def: 1.0, verbs: ['whispers at', 'claws'], tint: '#b0bec5' },
+      { name: 'Unblinking Statue', desc: 'It moves only when you blink. You have been blinking this whole time.', hp: 1.3, atk: 1.2, def: 1.5, verbs: ['seizes', 'grips'], tint: '#e0e0e0' },
+      { name: 'Hungry Filing Cabinet', desc: 'Its drawers open on their own. Something inside has been waiting for new paper.', hp: 1.1, atk: 1.0, def: 1.2, verbs: ['bites', 'slams'], tint: '#8d9aa6' },
+    ],
+    bosses: [
+      { name: 'The Overseer of Floor Zero', desc: 'Mostly paperwork, partly teeth. It has always been here, and it has always been watching.', hp: 1.3, atk: 1.1, def: 1.2, verbs: ['redacts', 'revokes'], tint: '#ef5350', intro: 'Every phone in the building rings at once. When you answer, the Overseer is already standing behind you.', defeat: 'The Overseer folds itself into a single sheet of paper. It is a report of this fight, dated tomorrow.' },
+      { name: 'Specimen Zero-Zero, Uncontained', desc: 'Its file says only: do not read this file. You already have.', hp: 1.2, atk: 1.3, def: 1.0, verbs: ['unmakes', 'rewrites'], tint: '#f5f5f5', intro: 'The containment door stands open. It was never closed. Specimen Zero-Zero has been expecting you.', defeat: 'Specimen Zero-Zero goes still and quiet. The file on the floor now has your name on it.' },
+    ],
+    ambient: ['A door you passed a moment ago is no longer there.', 'The intercom reads out a list of names. Yours is next.', 'Your footsteps echo half a second too late.', 'A sign says EXIT. The arrow points at the floor.', 'Somewhere above you, something heavy is dragged across a room.', 'The lights go out. When they come back, the corridor is longer.'],
+  },
+  {
     id: 'halloween',
     season: { from: [10, 15], to: [11, 15] },
     names: ['The Pumpkin Patch', 'Ravenmoor Manor', 'The Candlelit Fair'],

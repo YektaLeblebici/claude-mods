@@ -232,13 +232,13 @@ export const ARCHETYPES: Record<Archetype, [Sprite, Sprite]> = {
 const ARCHETYPE_RULES: [RegExp, Archetype][] = [
   [/swarm/i, 'swarm'],
   [/spider|scorpion|crab|hermit|turtle/i, 'crawler'],
-  [/bee|pixie|crow|hawk|harpy|wisp|lantern|sprite|gaze|bat/i, 'flyer'],
+  [/bee|pixie|crow|hawk|harpy|wisp|lantern|sprite|gaze|bat|drone/i, 'flyer'],
   [/leech|slug|glowworm|star eater|anglerfiend/i, 'blob'],
-  [/scarecrow|mimic|golem|armor|automaton|sentinel|steam|avalanche|guardian|null knight|clockwork|twigling|snowman/i, 'construct'],
-  [/wraith|banshee|specter|elemental|echo|stalker|paradox|ghost|poltergeist/i, 'spirit'],
+  [/scarecrow|mimic|golem|armor|automaton|sentinel|steam|avalanche|guardian|null knight|clockwork|twigling|snowman|mech|statue|cabinet/i, 'construct'],
+  [/wraith|banshee|specter|elemental|echo|stalker|paradox|ghost|poltergeist|daemon/i, 'spirit'],
   [/badger|boar|wolf|stag|frog|jackal|shark|salamander|hound|ram|yeti/i, 'beast'],
 ]
-const BOSS_WYRM = /wyrm|worm|ouroth|gulper|kraken|phoenix|roc|maw/i
+const BOSS_WYRM = /wyrm|worm|ouroth|gulper|kraken|phoenix|\broc\b|maw/i
 
 export function archetypeOf(enemy: Pick<Enemy, 'name' | 'isBoss'>): Archetype {
   if (enemy.isBoss) return BOSS_WYRM.test(enemy.name) ? 'wyrm' : 'giant'
