@@ -117,6 +117,10 @@ With `m` or `/q default` on:
 | A fork's merge failed | Goes on; the fork stays listed as failed |
 | You paused it | Goes on |
 
+You can also ask Claude to resume ("carry on with the queue"): its `queue_resume`
+does the same as `p`, whatever the pause, except while a task Claude queued
+itself is the one running; there you press `p` (see [Safety](#safety)).
+
 ## Forks
 
 Forking a task (`f` or `a`) starts a copy of the conversation so far that works
@@ -157,6 +161,8 @@ until git's garbage collection prunes them (about two weeks by default).
 | `queue_add` | Add a follow-up task to the end of the queue |
 | `queue_list` | Read the queue and the forks |
 | `queue_pause` | Pause the queue to ask the user something |
+| `queue_resume` | Resume a paused queue, as `p` does |
+| `queue_move` | Move a waiting task to a position among the waiting tasks (1 runs next) |
 | `fork_ready` | A fork reports its work done and committed |
 | `fork_merged` | A fork reports its merge, or why it could not |
 
@@ -170,6 +176,14 @@ a command, not every way a shell can spell it.
   yours run on their own; the rest wait as *proposed* until you press `y`. This
   stops one request snowballing into twenty commits, and limits what an
   instruction Claude read in a file or web page can queue.
+- **Claude resumes only from your work.** A pause is your checkpoint: after Esc,
+  a dirty checkout or a failed merge, resuming runs the next task on top of
+  whatever went wrong. `queue_resume` is refused while a task Claude queued
+  itself is running, and in forks, so a stray instruction in a dependency's
+  output cannot walk a chain of Claude's tasks past those checkpoints.
+- **Moving reorders, never approves.** `queue_move` can move any waiting task,
+  yours included, but a proposed task stays proposed wherever it goes. Running,
+  done and forked tasks do not move.
 - **Claude's tasks are marked.** They show as `claude` in the pane and reach
   Claude framed as its own suggestion, not as your words.
 - **Discarding work is blocked** while the queue works: `git reset --hard`,

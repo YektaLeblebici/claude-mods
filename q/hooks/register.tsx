@@ -28,6 +28,7 @@ import {
   focusTarget,
   keepsFocus,
   moveItem,
+  moveToPosition,
   nextQueued,
   nextReadyFork,
   parseCommand,
@@ -339,31 +340,38 @@ async function add($: $, text: string): Promise<QItem> {
   return item as unknown as QItem
 }
 
+/** Lifts the pause, each kind its own way: see "When the queue pauses" in the README. */
+function resumed(d: QData): QData {
+  if (!d.paused) return d
+
+  const x: QData = { ...d, paused: null }
+  const kind = d.paused.kind
+  if ((kind === 'interrupted' || kind === 'restored') && d.runningId) {
+    // The interrupted task goes back to the front of the queue.
+    const running = d.items.find(i => i.id === d.runningId)
+    const rest = d.items.filter(i => i.id !== d.runningId)
+
+    return {
+      ...x,
+      runningId: null,
+      runningTurnId: null,
+      items: running ? [{ ...running, status: 'queued' }, ...rest] : rest,
+    }
+  }
+  if (kind === 'question' && d.runningId) {
+    return finishRunning(x)
+  }
+  if (kind === 'dirty') return { ...x, isDirtyAcked: true }
+
+  return x
+}
+
 async function togglePause($: $): Promise<void> {
-  await mutate($, d => {
-    if (!d.paused) return { ...d, paused: { kind: 'user', reason: 'Paused by you.' } }
+  await mutate($, d => (d.paused ? resumed(d) : { ...d, paused: { kind: 'user', reason: 'Paused by you.' } }))
+  await afterResume($)
+}
 
-    const resumed: QData = { ...d, paused: null }
-    const kind = d.paused.kind
-    if ((kind === 'interrupted' || kind === 'restored') && d.runningId) {
-      // The interrupted task goes back to the front of the queue.
-      const running = d.items.find(i => i.id === d.runningId)
-      const rest = d.items.filter(i => i.id !== d.runningId)
-
-      return {
-        ...resumed,
-        runningId: null,
-        runningTurnId: null,
-        items: running ? [{ ...running, status: 'queued' }, ...rest] : rest,
-      }
-    }
-    if (kind === 'question' && d.runningId) {
-      return finishRunning(resumed)
-    }
-    if (kind === 'dirty') return { ...resumed, isDirtyAcked: true }
-
-    return resumed
-  })
+async function afterResume($: $): Promise<void> {
   // A merge holding the queue is checked at once: p is the way out of one whose fork is gone.
   const { mergeHolder } = await read($, data)
   if (mergeHolder) later($, () => checkMerge($, mergeHolder))
@@ -928,6 +936,26 @@ export const register: Register = on => {
       isDeferred: false,
     })
     await $.tool.register({
+      name: 'queue_resume',
+      description:
+        'Resume the paused task queue, the same as the user pressing p: a task you asked a question in is marked done, an interrupted one is sent again. Only when the user asks for it, and never from a task you queued yourself.',
+      isDeferred: false,
+    })
+    await $.tool.register({
+      name: 'queue_move',
+      description:
+        'Move a waiting task (queued or proposed) to a new place among the waiting tasks; position 1 runs next. Moving a proposed task does not approve it.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          task: { type: 'integer', description: 'The task number queue_list shows, without the #' },
+          position: { type: 'integer', minimum: 1, description: '1 runs next; past the end puts it last' },
+        },
+        required: ['task', 'position'],
+      },
+      isDeferred: false,
+    })
+    await $.tool.register({
       name: 'fork_ready',
       description: 'Only for a queue fork: report that your task is done and committed on your branch, and wait for the merge lock.',
       inputSchema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'] },
@@ -1226,6 +1254,44 @@ export const register: Register = on => {
     $.ui.toast('q: paused, Claude has a question')
 
     return { result: 'The queue is paused. Ask your question and end your turn; the user resumes the queue.' }
+  })
+
+  on('tool.call', { tool: 'mcp__q__queue_resume' }, async $ => {
+    const d = await read($, data)
+    if (d.role) return { result: 'Not resumed: this session is a fork, and the queue belongs to the session that made it.' }
+    if (!d.paused) return { result: 'The queue is not paused.' }
+    // As with pushes: a task Claude queued must not lift the user's checkpoints.
+    const running = d.items.find(i => i.id === d.runningId)
+    if (running?.source === 'claude') {
+      return { result: `Not resumed: #${running.id.slice(1)} is a task you queued yourself. Ask the user to press p in /q.` }
+    }
+
+    await mutate($, resumed)
+    await afterResume($)
+    $.ui.toast('q: Claude resumed the queue')
+
+    return { result: `Resumed; it was paused: ${d.paused.reason} The next task is sent when your turn ends.` }
+  })
+
+  on('tool.call', { tool: 'mcp__q__queue_move' }, async ($, e) => {
+    const input = e as unknown as { task?: unknown; position?: unknown }
+    const id = `i${String(input.task ?? '').replace(/^#/, '')}`
+    const position = Number(input.position)
+    if (!Number.isFinite(position) || position < 1) return { result: 'Not moved: position must be 1 or more.' }
+
+    const d = await read($, data)
+    const item = d.items.find(i => i.id === id)
+    if (!item) return { result: `Not moved: there is no task #${id.slice(1)}.` }
+    if (item.status !== 'queued' && item.status !== 'proposed') {
+      return { result: `Not moved: #${id.slice(1)} is ${item.status}; only waiting tasks move.` }
+    }
+
+    const after = await mutate($, x => moveToPosition(x, id, position))
+    const waiting = after.items.filter(i => i.status === 'queued' || i.status === 'proposed')
+    const at = waiting.findIndex(i => i.id === id) + 1
+    const lines = waiting.map((i, n) => ` ${n + 1}. #${i.id.slice(1)} [${i.status}] (${i.source}) ${i.text}`)
+
+    return { result: [`Moved #${id.slice(1)} to position ${at} of ${waiting.length} waiting.`, ...lines].join('\n') }
   })
 
   on('tool.call', { tool: 'mcp__q__fork_ready' }, async ($, e) => {

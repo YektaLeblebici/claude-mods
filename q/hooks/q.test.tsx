@@ -18,6 +18,7 @@ import {
   moveCursor,
   keepsFocus,
   moveItem,
+  moveToPosition,
   focusTarget,
   refocusTarget,
   removeFork,
@@ -53,6 +54,22 @@ describe('queue logic', () => {
     expect(moveItem(d, 'i3', -1).items.map(i => i.text)).toEqual(['a', 'c', 'b'])
     expect(moveItem(d, 'i2', -1).items.map(i => i.text)).toEqual(['a', 'b', 'c'])
     expect(runNext(d, 'i3').items.map(i => i.text)).toEqual(['a', 'c', 'b'])
+  })
+
+  test('moving to a position counts waiting items only, clamps past the end, and approves nothing', () => {
+    let d = EMPTY
+    for (const t of ['a', 'b', 'c', 'd']) d = addItem(d, t, 'you').data
+    d = {
+      ...d,
+      items: d.items.map(i => (i.id === 'i1' ? { ...i, status: 'running' } : i.id === 'i4' ? { ...i, status: 'proposed' } : i)),
+    }
+    const texts = (x: typeof d) => x.items.map(i => i.text)
+
+    expect(texts(moveToPosition(d, 'i4', 1))).toEqual(['a', 'd', 'b', 'c'])
+    expect(moveToPosition(d, 'i4', 1).items.find(i => i.id === 'i4')?.status).toBe('proposed')
+    expect(texts(moveToPosition(d, 'i2', 2))).toEqual(['a', 'c', 'b', 'd'])
+    expect(texts(moveToPosition(d, 'i2', 99))).toEqual(['a', 'c', 'd', 'b'])
+    expect(texts(moveToPosition(d, 'i1', 3))).toEqual(['a', 'b', 'c', 'd'])
   })
 
   test('the Bash guard stops discarding everywhere, and pushes and PRs in forks and Claude-queued tasks', () => {
@@ -925,5 +942,73 @@ describe('the mod', () => {
 
     expect(text).toContain('[queued] (claude) follow-up 3')
     expect(text).toContain('[proposed] (claude) follow-up 4')
+  })
+
+  /** Records each prompt the queue sends, and lets turns run as the test drives them. */
+  const turns = (on: On): string[] => {
+    const sent: string[] = []
+    on('prompt.submit', ($, e) => {
+      sent.push(e.text)
+
+      return { text: e.text }
+    })
+    on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+    on('turn.complete', (_, e) => ({ text: e.answer }) as never)
+
+    return sent
+  }
+  const resume = async ($: Engine) => String((await $.tool.call({ tool: 'mcp__q__queue_resume' } as never)).result)
+
+  test("Claude's queue_resume lifts its question's pause once answered: the task is done and the next is sent", async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const sent = turns(on)
+
+    expect(await resume($)).toBe('The queue is not paused.')
+    await runQ($, 'task one')
+    await runQ($, 'task two')
+    await clock.advance(10)
+    await $.turn.start({ text: sent[0], turnId: 't1' } as never)
+    await $.tool.call({ tool: 'mcp__q__queue_pause', question: 'Which branch?' } as never)
+    await $.turn.complete({ answer: 'Which branch?', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    expect(await listed($)).toStartWith('Queue paused: Claude asked: Which branch?')
+
+    // The person answers, and asks Claude to carry on.
+    await $.turn.start({ text: 'main, then carry on', turnId: 't2' } as never)
+    expect(await resume($)).toStartWith('Resumed')
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' } as never)
+    await clock.advance(10)
+    expect(await listed($)).toContain('[done] (you) task one')
+    expect(sent.length).toBe(2)
+  })
+
+  test("queue_resume is refused while a task Claude queued is the one running", async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const sent = turns(on)
+
+    await $.tool.call({ tool: 'mcp__q__queue_add', text: 'dedupe the retry helpers' } as never)
+    await clock.advance(10)
+    await $.turn.start({ text: sent[0], turnId: 't1' } as never)
+    await $.tool.call({ tool: 'mcp__q__queue_pause', question: 'Keep the old helper?' } as never)
+
+    expect(await resume($)).toMatch(/task you queued yourself/)
+    expect(await listed($)).toStartWith('Queue paused')
+  })
+
+  test("Claude's queue_move places a waiting task and refuses the running one", async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    turns(on)
+    for (const t of ['a', 'b', 'c']) await runQ($, t)
+    await clock.advance(10)
+    const move = async (task: number, position: number) =>
+      String((await $.tool.call({ tool: 'mcp__q__queue_move', task, position } as never)).result)
+
+    expect(await move(3, 1)).toStartWith('Moved #3 to position 1 of 2 waiting.')
+    expect((await listed($)).split('\n').slice(1, 4)).toEqual(['#1 [running] (you) a', '#3 [queued] (you) c', '#2 [queued] (you) b'])
+    expect(await move(1, 2)).toMatch(/#1 is running/)
+    expect(await move(9, 1)).toMatch(/no task #9/)
+    expect(await move(2, 0)).toMatch(/1 or more/)
   })
 })
