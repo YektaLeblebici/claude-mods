@@ -938,7 +938,7 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'queue_resume',
       description:
-        'Resume the paused task queue, the same as the user pressing p: a task you asked a question in is marked done, an interrupted one is sent again. Only when the user asks for it, and never from a task you queued yourself.',
+        'Resume the paused task queue, the same as the user pressing p: a task you asked a question in is marked done, an interrupted one is sent again. Only when the user asks for it.',
       isDeferred: false,
     })
     await $.tool.register({
@@ -1260,11 +1260,6 @@ export const register: Register = on => {
     const d = await read($, data)
     if (d.role) return { result: 'Not resumed: this session is a fork, and the queue belongs to the session that made it.' }
     if (!d.paused) return { result: 'The queue is not paused.' }
-    // As with pushes: a task Claude queued must not lift the user's checkpoints.
-    const running = d.items.find(i => i.id === d.runningId)
-    if (running?.source === 'claude') {
-      return { result: `Not resumed: #${running.id.slice(1)} is a task you queued yourself. Ask the user to press p in /q.` }
-    }
 
     await mutate($, resumed)
     await afterResume($)

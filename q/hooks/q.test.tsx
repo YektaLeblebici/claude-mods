@@ -982,7 +982,7 @@ describe('the mod', () => {
     expect(sent.length).toBe(2)
   })
 
-  test("queue_resume is refused while a task Claude queued is the one running", async ($, on) => {
+  test('queue_resume works in a task Claude queued too', async ($, on) => {
     const clock = mock.clock(on)
     mock.store(on)
     const sent = turns(on)
@@ -992,8 +992,8 @@ describe('the mod', () => {
     await $.turn.start({ text: sent[0], turnId: 't1' } as never)
     await $.tool.call({ tool: 'mcp__q__queue_pause', question: 'Keep the old helper?' } as never)
 
-    expect(await resume($)).toMatch(/task you queued yourself/)
-    expect(await listed($)).toStartWith('Queue paused')
+    expect(await resume($)).toStartWith('Resumed')
+    expect(await listed($)).toContain('[done] (claude) dedupe the retry helpers')
   })
 
   test("Claude's queue_move places a waiting task and refuses the running one", async ($, on) => {

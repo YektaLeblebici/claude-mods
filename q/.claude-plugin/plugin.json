@@ -1,6 +1,6 @@
 {
   "name": "q",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "A prompt queue: /q adds tasks that run one after another, each fork-able into its own worktree",
   "types": "./types/index.d.ts"
 }
