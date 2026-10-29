@@ -1,6 +1,8 @@
 import type { Affix, ChestKind, Enemy, Fight, Fx, Item, LogEntry, LogKind, Luck, PetId, Rarity, Save, Slot, Zone, ZoneModifier } from '../types'
 import {
   ACHIEVEMENTS,
+  named,
+  the,
   AFFIX_INFO,
   BIOMES,
   COMMON_PETS,
@@ -111,10 +113,6 @@ function luckPower(s: Save, luck: Luck): number {
 }
 
 /** "the Dire Wolf", but "The Deep Maw" as named: some bosses carry their own article. */
-const the = (name: string, isCapital = false) => (/^the /i.test(name) ? name : `${isCapital ? 'The' : 'the'} ${name}`)
-
-/** How battle text names an enemy: a boss or wild character by its own name ("Vulkazar the Molten"), anyone else as "the Dire Wolf". */
-const named = (e: Pick<Enemy, 'name' | 'isBoss' | 'legend'>, isCapital = false) => (e.isBoss || e.legend ? e.name : the(e.name, isCapital))
 
 const luckTag = (luck: Luck) => (luck === 'lucky' ? ' 🍀' : luck === 'unlucky' ? ' 💀' : '')
 const luckKind = (luck: Luck, fallback: LogKind): LogKind =>
@@ -673,7 +671,7 @@ export function openChest(save: Save, now: number, rng: Rng): TickResult & { kin
     log(s, 'loot', `Another commit: a small chest with ${gold}g.`)
     if (rng() < 0.35) gainItem(s, loot(s, rng, 'neutral', 'common', 'uncommon'), [], fx)
   }
-  achievements(s, toasts)
+  achievements(s, toasts, save, now)
   return { save: s, toasts, fx: fx.filter((f, i) => fx.indexOf(f) === i), kind }
 }
 
@@ -689,13 +687,36 @@ function levelUps(s: Save, toasts: string[], fx: Fx[]) {
   }
 }
 
-function achievements(s: Save, toasts: string[]) {
+/** Unlocks what the step earned, keeping the story of each: when, where, and what happened (from `before`). */
+function achievements(s: Save, toasts: string[], before: Save, now?: number) {
   for (const a of ACHIEVEMENTS) {
     if (s.achievements.includes(a.id) || !a.check(s)) continue
     s.achievements = [...s.achievements, a.id]
+    let story = ''
+    try {
+      story = a.story(s, before)
+    } catch {
+      // A story that can't be told leaves the achievement earned all the same.
+    }
+    s.achievementStories = { ...s.achievementStories, [a.id]: { ...(now === undefined ? {} : { at: now }), depth: s.zone.depth, zone: s.zone.name, story } }
     log(s, 'level', `🏆 Achievement unlocked: ${a.name}`)
     toasts.push(`🏆 ${a.name}: ${a.desc}`)
   }
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/**
+ * What the pane shows for an earned achievement: its flavor line, then how it was earned. One earned
+ * before stories were kept says what it takes instead.
+ */
+export function achievementLines(s: Save, id: string): string[] {
+  const a = ACHIEVEMENTS.find(x => x.id === id)
+  if (!a) return []
+  const told = s.achievementStories?.[id]
+  if (!told) return [`“${a.flavor}”`, `${a.desc}. Earned before Clawd kept a journal.`]
+  const date = told.at === undefined ? '' : ` ${MONTHS[new Date(told.at).getMonth()]} ${new Date(told.at).getDate()}`
+  return [`“${a.flavor}”`, `Earned${date} at depth ${told.depth} in ${told.zone}${told.story ? `: ${told.story}` : ''}.`]
 }
 
 /**
@@ -725,7 +746,7 @@ export function tick(save: Save, rng: Rng, now?: number): TickResult {
   else s.phase = 'exploring'
 
   levelUps(s, toasts, fx)
-  achievements(s, toasts)
+  achievements(s, toasts, save, now)
   // A chest left on the road goes once anything but a quiet stretch of walking happens.
   if (s.chestOnRoad && (s.phase !== 'exploring' || fx.some(f => f !== 'explore'))) s.chestOnRoad = false
   if (titleOf(s) !== titleOf(save)) {

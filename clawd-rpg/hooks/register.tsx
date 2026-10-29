@@ -9,6 +9,7 @@ import {
   heroName,
   heroStats,
   isCommit,
+  achievementLines,
   itemLabel,
   newSave,
   nextLuck,
@@ -46,6 +47,8 @@ const frameRef = { plugin: 'clawd-rpg', key: 'frame' } as const
 const burstRef = { plugin: 'clawd-rpg', key: 'burst' } as const
 /** Why this session cannot play the shared save, when it cannot: it then shows only BLOCKED_SAID. */
 const blockedRef = { plugin: 'clawd-rpg', key: 'blocked' } as const
+/** The achievement whose story is open in this session's pane, if any. */
+const openAchievementRef = { plugin: 'clawd-rpg', key: 'openAchievement' } as const
 
 const BLOCKED_SAID: Record<Blocked, string> = {
   newer: '⚔  Claude RPG is paused in this session: your save is from a newer version of the mod. Run /reload-plugins to carry on.',
@@ -488,6 +491,7 @@ export const register: Register = on => {
           ? { text: `💀 Next tick is unlucky${(s.omens ?? 0) > 1 ? ` (${s.omens} omens)` : ''}`, color: 'error' }
           : { text: 'Next tick is neutral', color: 'subtle' }
     const unlocked = ACHIEVEMENTS.filter(a => s.achievements.includes(a.id))
+    const { value: openAchievement = null } = await $.state.get(openAchievementRef)
     const nextSkill = SKILLS.find(k => k.level > s.hero.level)
     // A pet only a newer version knows is left out, from the count as from the list.
     const pets = (s.hero.pets ?? []).filter(owned => owned.id in PETS)
@@ -606,8 +610,23 @@ export const register: Register = on => {
         {unlocked.length === 0 ? (
           <Text dimColor>None yet.</Text>
         ) : (
-          <Text wrap="wrap">{unlocked.map(a => `🏆 ${a.name}`).join('  ')}</Text>
+          <Box flexDirection="row" flexWrap="wrap">
+            {unlocked.map(a => (
+              <Button
+                key={`ach-${a.id}`}
+                label={`${openAchievement === a.id ? '▾' : '🏆'} ${a.name}`}
+                onPress={() => void $.state.set(openAchievementRef, openAchievement === a.id ? null : a.id)}
+              />
+            ))}
+          </Box>
         )}
+        {openAchievement && unlocked.some(a => a.id === openAchievement)
+          ? achievementLines(s, openAchievement).map((line, i) => (
+              <Text italic={i === 0} dimColor={i > 0} wrap="wrap">
+                {line}
+              </Text>
+            ))
+          : null}
         <Text dimColor>
           {s.stats.kills} kills · {s.stats.bosses} bosses · {s.stats.ticks} ticks · deepest {s.stats.maxDepth}
         </Text>

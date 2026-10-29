@@ -66,11 +66,17 @@ test('its monsters and bosses appear only there, and Santa Claus is one of its t
 })
 
 /** Beats a Christmas boss once (it has 1 HP left) and gives back the pets Clawd got from it. */
+// The fight each boss starts from, made once: tick works on a copy, so thousands of fights share it.
+const fights = new Map<string, Save>()
+
 function beat(name: string, rng: () => number): PetId[] {
-  const base = newSave(always(0.5))
-  const zone = { ...base.zone, biome: 'christmas' }
-  const boss = XMAS.bosses.find(b => b.name === name)!
-  const s: Save = { ...base, zone, phase: 'fighting', enemy: { ...makeEnemy(always(0.5), 1, boss, 'boss', base.hero), hp: 1 } }
+  let s = fights.get(name)
+  if (!s) {
+    const base = newSave(always(0.5))
+    const boss = XMAS.bosses.find(b => b.name === name)!
+    s = { ...base, zone: { ...base.zone, biome: 'christmas' }, phase: 'fighting', enemy: { ...makeEnemy(always(0.5), 1, boss, 'boss', base.hero), hp: 1 } }
+    fights.set(name, s)
+  }
   const { save } = tick(s, rng)
   expect(save.enemy).toBe(null)
   return (save.hero.pets ?? []).map(p => p.id)

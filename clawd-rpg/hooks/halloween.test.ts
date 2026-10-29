@@ -53,10 +53,17 @@ test('its monsters and bosses appear only there, and look the part', () => {
 })
 
 /** Beats a boss of `biome` once (it has 1 HP left) and gives back the log of that win. */
+// The fight each boss starts from, made once: tick works on a copy, so thousands of fights share it.
+const fights = new Map<string, Save>()
+
 function beat(biome: string, name: string, rng: () => number): string {
-  const base = newSave(always(0.5))
-  const boss = BIOMES.find(b => b.id === biome)!.bosses.find(b => b.name === name)!
-  const s: Save = { ...base, zone: { ...base.zone, biome, depth: 6 }, phase: 'fighting', enemy: { ...makeEnemy(always(0.5), 6, boss, 'boss', base.hero), hp: 1 } }
+  let s = fights.get(`${biome}/${name}`)
+  if (!s) {
+    const base = newSave(always(0.5))
+    const boss = BIOMES.find(b => b.id === biome)!.bosses.find(b => b.name === name)!
+    s = { ...base, zone: { ...base.zone, biome, depth: 6 }, phase: 'fighting', enemy: { ...makeEnemy(always(0.5), 6, boss, 'boss', base.hero), hp: 1 } }
+    fights.set(`${biome}/${name}`, s)
+  }
   const { save } = tick(s, rng)
   expect(save.enemy).toBe(null)
   return save.log.map(l => l.text).join('\n')

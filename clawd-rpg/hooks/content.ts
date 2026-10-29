@@ -1,4 +1,4 @@
-import type { Affix, LegendId, PetId, Rarity, Save, Slot, ZoneModifier } from '../types'
+import type { Affix, Enemy, LegendId, PetId, Rarity, Save, Slot, ZoneModifier } from '../types'
 
 export type EnemyDef = {
   name: string
@@ -533,20 +533,53 @@ const isRarePlus = (s: Save) =>
     return item !== null && ['rare', 'epic', 'legendary'].includes(item.rarity)
   })
 
-export const ACHIEVEMENTS: { id: string; name: string; desc: string; check: (s: Save) => boolean }[] = [
-  { id: 'first-blood', name: 'First Blood', desc: 'Win your first fight', check: s => s.stats.kills >= 1 },
-  { id: 'centurion', name: 'Centurion', desc: 'Defeat 100 enemies', check: s => s.stats.kills >= 100 },
-  { id: 'slayer', name: 'Slayer', desc: 'Defeat 1,000 enemies', check: s => s.stats.kills >= 1000 },
-  { id: 'boss-hunter', name: 'Boss Hunter', desc: 'Defeat 10 bosses', check: s => s.stats.bosses >= 10 },
-  { id: 'deep-diver', name: 'Deep Diver', desc: 'Reach depth 10', check: s => s.stats.maxDepth >= 10 },
-  { id: 'abyssal', name: 'Abyssal', desc: 'Reach depth 25', check: s => s.stats.maxDepth >= 25 },
-  { id: 'charmed', name: 'Charmed', desc: '10 lucky ticks in a row', check: s => s.stats.luckyStreak >= 10 },
-  { id: 'cursed-coder', name: 'Cursed Coder', desc: '10 unlucky ticks in a row', check: s => s.stats.unluckyStreak >= 10 },
-  { id: 'against-all-odds', name: 'Against All Odds', desc: 'Win a fight where every tick was unlucky', check: s => s.stats.wonAgainstOdds },
-  { id: 'shiny', name: 'Shiny', desc: 'Find an epic item', check: s => s.stats.epicFound },
-  { id: 'legend', name: 'Legend', desc: 'Find a legendary item', check: s => s.stats.legendaryFound },
-  { id: 'fully-kitted', name: 'Fully Kitted', desc: 'Equip rare or better in every slot', check: isRarePlus },
-  { id: 'back-on-your-feet', name: 'Back on Your Feet', desc: 'Recover from 10 knock-outs', check: s => s.stats.knockouts >= 10 },
-  { id: 'dedicated', name: 'Dedicated', desc: 'Live through 1,000 ticks', check: s => s.stats.ticks >= 1000 },
-  { id: 'veteran', name: 'Veteran', desc: 'Reach level 20', check: s => s.hero.level >= 20 },
+/** "the Dire Wolf"; a name that already starts with "the" stays as it is. */
+export const the = (name: string, isCapital = false) => (/^the /i.test(name) ? name : `${isCapital ? 'The' : 'the'} ${name}`)
+
+/** How text names an enemy: a boss or wild character by its own name ("Vulkazar the Molten"), anyone else as "the Dire Wolf". */
+export const named = (e: Pick<Enemy, 'name' | 'isBoss' | 'legend'>, isCapital = false) => (e.isBoss || e.legend ? e.name : the(e.name, isCapital))
+
+/** The foe Clawd had just faced when the step began, for a story; null if none. */
+const foe = (before: Save) => (before.enemy ? named(before.enemy) : null)
+
+/** The newest item of this rarity the log says Clawd found. */
+function foundItem(s: Save, rarity: Rarity): string | null {
+  for (let i = s.log.length - 1; i >= 0; i--) {
+    const found = new RegExp(`^Found ${rarity} (.+?), (equipped|sold)`).exec(s.log[i]!.text)
+    if (found) return found[1]!
+  }
+  return null
+}
+
+/**
+ * An achievement: its rule (`desc`), a flavor line, and `story`, how the moment it was earned is
+ * told, from the save after the step that earned it and the save before.
+ */
+export type Achievement = {
+  id: string
+  name: string
+  desc: string
+  flavor: string
+  story: (s: Save, before: Save) => string
+  check: (s: Save) => boolean
+}
+
+const felled = (what: string) => (s: Save, before: Save) => (foe(before) ? `felling ${foe(before)}, ${what} ${s.stats.kills}` : `${what} ${s.stats.kills}`)
+
+export const ACHIEVEMENTS: Achievement[] = [
+  { id: 'first-blood', name: 'First Blood', desc: 'Win your first fight', flavor: 'Everyone remembers their first. So, briefly, did the loser.', story: (s, before) => (foe(before) ? `felling ${foe(before)}` : 'winning a first fight'), check: s => s.stats.kills >= 1 },
+  { id: 'centurion', name: 'Centurion', desc: 'Defeat 100 enemies', flavor: 'They started counting. You never stopped.', story: felled('foe number'), check: s => s.stats.kills >= 100 },
+  { id: 'slayer', name: 'Slayer', desc: 'Defeat 1,000 enemies', flavor: 'A thousand foes. The bards ran out of rhymes at three hundred.', story: felled('foe number'), check: s => s.stats.kills >= 1000 },
+  { id: 'boss-hunter', name: 'Boss Hunter', desc: 'Defeat 10 bosses', flavor: 'Ten thrones, ten crowns, ten very surprised tyrants.', story: (s, before) => (foe(before) ? `toppling ${foe(before)}, boss number ${s.stats.bosses}` : `boss number ${s.stats.bosses}`), check: s => s.stats.bosses >= 10 },
+  { id: 'deep-diver', name: 'Deep Diver', desc: 'Reach depth 10', flavor: 'Ten levels down, sunlight is only a rumour.', story: s => `descending into ${s.zone.name}`, check: s => s.stats.maxDepth >= 10 },
+  { id: 'abyssal', name: 'Abyssal', desc: 'Reach depth 25', flavor: 'Twenty-five levels deep, the dark started looking back. You stared harder.', story: s => `descending into ${s.zone.name}`, check: s => s.stats.maxDepth >= 25 },
+  { id: 'charmed', name: 'Charmed', desc: '10 lucky ticks in a row', flavor: 'Ten green builds in a row. The dice owe you nothing now.', story: s => `a run of ${s.stats.luckyStreak} lucky ticks in a row`, check: s => s.stats.luckyStreak >= 10 },
+  { id: 'cursed-coder', name: 'Cursed Coder', desc: '10 unlucky ticks in a row', flavor: 'Ten failures in a row, and still you pressed Enter.', story: s => `a run of ${s.stats.unluckyStreak} unlucky ticks in a row`, check: s => s.stats.unluckyStreak >= 10 },
+  { id: 'against-all-odds', name: 'Against All Odds', desc: 'Win a fight where every tick was unlucky', flavor: 'Every roll went wrong, and you won anyway.', story: (_s, before) => (foe(before) ? `beating ${foe(before)} without a single lucky break` : 'winning without a single lucky break'), check: s => s.stats.wonAgainstOdds },
+  { id: 'shiny', name: 'Shiny', desc: 'Find an epic item', flavor: 'A purple glow from the loot pile, and a grin you could not hide.', story: s => (foundItem(s, 'epic') ? `finding ${foundItem(s, 'epic')}` : 'finding an epic item'), check: s => s.stats.epicFound },
+  { id: 'legend', name: 'Legend', desc: 'Find a legendary item', flavor: 'Gold light spills out of the loot. Some things are found once a lifetime.', story: s => (foundItem(s, 'legendary') ? `finding ${foundItem(s, 'legendary')}` : 'finding a legendary item'), check: s => s.stats.legendaryFound },
+  { id: 'fully-kitted', name: 'Fully Kitted', desc: 'Equip rare or better in every slot', flavor: 'Rare or better from blade to trinket. You jingle impressively.', story: s => `wearing ${[s.hero.gear.weapon, s.hero.gear.armor, s.hero.gear.trinket].map(i => i?.name).filter(Boolean).join(', ')}`, check: isRarePlus },
+  { id: 'back-on-your-feet', name: 'Back on Your Feet', desc: 'Recover from 10 knock-outs', flavor: 'Knocked flat ten times. Got up ten times.', story: s => `getting up after knock-out number ${s.stats.knockouts}`, check: s => s.stats.knockouts >= 10 },
+  { id: 'dedicated', name: 'Dedicated', desc: 'Live through 1,000 ticks', flavor: 'A thousand prompts and replies. Clawd felt every one of them.', story: s => `tick number ${s.stats.ticks}`, check: s => s.stats.ticks >= 1000 },
+  { id: 'veteran', name: 'Veteran', desc: 'Reach level 20', flavor: 'Level twenty. Younger heroes ask you for directions now.', story: s => `reaching level ${s.hero.level}`, check: s => s.hero.level >= 20 },
 ]

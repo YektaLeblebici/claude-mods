@@ -98,6 +98,8 @@ export type Save = {
   chestOnRoad?: boolean
   /** When the last good chest opened (ms since epoch); commits within 30 minutes open small ones. */
   lastGoodChestAt?: number
+  /** How each achievement was earned, by its id; kept from the release that added them on. */
+  achievementStories?: Record<string, AchievementStory>
   hero: Hero
   zone: Zone
   phase: Phase
@@ -110,6 +112,9 @@ export type Save = {
   stats: Stats
 }
 
+/** The moment an achievement was earned: when (ms since epoch, when known), where, and what happened. */
+export type AchievementStory = { at?: number; depth: number; zone: string; story: string }
+
 /** How much of the game shows: the full animated view, the status line alone, or nothing. */
 export type View = 'show' | 'mini' | 'hide'
 
@@ -121,6 +126,6 @@ export type Burst = { fx: Fx[]; at: number; enemy: Enemy | null }
 
 declare module 'claude-code' {
   interface PluginState {
-    'clawd-rpg': { save: Save; view: View; viewHere: View | null; frame: number; burst: Burst | null; blocked: Blocked | null }
+    'clawd-rpg': { save: Save; view: View; viewHere: View | null; frame: number; burst: Burst | null; blocked: Blocked | null; openAchievement: string | null }
   }
 }
