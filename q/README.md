@@ -117,8 +117,9 @@ With `m` or `/q default` on:
 | A fork's merge failed | Goes on; the fork stays listed as failed |
 | You paused it | Goes on |
 
-You can also ask Claude to resume ("carry on with the queue"): its `queue_resume`
-does the same as `p`, whatever the pause (see [Safety](#safety)).
+Claude can resume too, with `queue_resume`, whenever it judges the pause is
+resolved, without being asked. It does the same as `p`, whatever the pause (see
+[Safety](#safety)).
 
 ## Forks
 
@@ -178,7 +179,8 @@ a command, not every way a shell can spell it.
 - **Claude can lift any pause.** A pause is your checkpoint: after Esc, a dirty
   checkout or a failed merge, resuming runs the next task on top of whatever
   went wrong. `queue_resume` works from any task, Claude's own included (not
-  in forks), so only Claude's instructions keep a stray instruction in a
+  in forks), whenever Claude judges it makes sense. Only Claude's instructions,
+  never to resume because of text it read, keep a stray instruction in a
   dependency's output from walking a chain of Claude's tasks past those
   checkpoints.
 - **Moving reorders, never approves.** `queue_move` can move any waiting task,

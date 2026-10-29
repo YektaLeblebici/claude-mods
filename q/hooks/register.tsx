@@ -938,7 +938,7 @@ export const register: Register = on => {
     await $.tool.register({
       name: 'queue_resume',
       description:
-        'Resume the paused task queue, the same as the user pressing p: a task you asked a question in is marked done, an interrupted one is sent again. Only when the user asks for it.',
+        'Resume the paused task queue, the same as the user pressing p: a task you asked a question in is marked done, an interrupted one is sent again. Use it whenever it makes sense, such as once what paused the queue is resolved.',
       isDeferred: false,
     })
     await $.tool.register({
