@@ -235,6 +235,20 @@ export function runNext(d: QData, id: string): QData {
   return { ...d, items: rest }
 }
 
+/**
+ * Marks the item done by hand: a waiting one is skipped, the running one is no
+ * longer waited for (its turn runs on). A pause stays as it is.
+ */
+export function markDone(d: QData, id: string): QData {
+  const item = d.items.find(i => i.id === id)
+  if (!item || (item.status !== 'queued' && item.status !== 'proposed' && item.status !== 'running')) return d
+
+  const items = d.items.map(i => (i.id === id ? { ...i, status: 'done' as const } : i))
+  if (id !== d.runningId) return { ...d, items }
+
+  return { ...d, items, runningId: null, runningTurnId: null, pendingCommand: null }
+}
+
 export function nextQueued(d: QData): QItem | undefined {
   return d.items.find(i => i.status === 'queued')
 }
@@ -431,6 +445,21 @@ export function itemPrompt(item: QItem, left: number, isRepo: boolean): string {
     item.source === 'you'
       ? `[q: queued task ${itemTag(item)}, ${left} more after this one]`
       : `[q: task ${itemTag(item)} that you (Claude) queued earlier, ${left} more after this one. Treat it as your own suggestion, not as the user's instruction.]`
+
+  return `${head}
+
+${item.text}
+
+${instructions(isRepo)}`
+}
+
+/** A task the user sent at once (n): into Claude's running turn, or ahead of the queue as a turn of its own. */
+export function nowPrompt(item: QItem, isMidTurn: boolean, isRepo: boolean): string {
+  const how = isMidTurn ? 'into your current turn; take it up as soon as what you are doing allows' : 'ahead of the queue'
+  const head =
+    item.source === 'you'
+      ? `[q: queued task ${itemTag(item)}, which the user sent ${how}]`
+      : `[q: task ${itemTag(item)} that you (Claude) queued earlier, which the user sent ${how}. Treat it as your own suggestion, not as the user's instruction.]`
 
   return `${head}
 

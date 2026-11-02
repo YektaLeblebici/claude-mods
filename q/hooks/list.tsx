@@ -30,6 +30,8 @@ const PLAIN_KEYS: Record<string, string> = {
   e: 'edit',
   d: 'delete',
   r: 'run-next',
+  n: 'send-now',
+  x: 'mark-done',
   y: 'approve',
   f: 'fork-session',
   a: 'fork-agent',

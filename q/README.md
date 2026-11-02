@@ -83,6 +83,8 @@ keys (`p`, `m`, `c` and the rest), so Tab from the field reaches them.
 | `e` | Edit the task |
 | `d` | Delete the task — or the fork, see below |
 | `r` | Run this task next |
+| `n` | Send this task now: into Claude's running turn, or as a turn of its own when Claude is idle (even while paused) |
+| `x` | Mark this task done: a waiting one is skipped; the running one is no longer waited for, its turn runs on |
 | `y` | Approve a task Claude proposed past its limit |
 | `f` | Fork the task into a background **session** |
 | `a` | Fork the task into a background **subagent** |
@@ -93,6 +95,12 @@ keys (`p`, `m`, `c` and the rest), so Tab from the field reaches them.
 
 The buttons under the list do the same with the mouse. On surfaces without the
 list (VS Code, mobile) the buttons carry the keys, with `w`/`s` for moving.
+
+`n` is the one key that does not wait for the turn to end. Mid-turn, the task
+joins Claude's conversation as a message it reads at its next step (an
+organization's policy plugin may refuse that; the task then stays queued). A
+queued slash command cannot run mid-turn, so `n` refuses it; `r` runs it next.
+`n` on a task Claude proposed past its limit sends it, which is your approval.
 
 ### Default mode
 

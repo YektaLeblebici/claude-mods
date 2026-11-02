@@ -16,6 +16,7 @@ import {
   isQueueable,
   isSameCommand,
   itemPrompt,
+  markDone,
   itemTag,
   judgeBash,
   judgeForkBash,
@@ -30,6 +31,7 @@ import {
   moveItem,
   moveToPosition,
   nextQueued,
+  nowPrompt,
   nextReadyFork,
   parseCommand,
   parseControl,
@@ -233,6 +235,49 @@ async function pump($: $): Promise<void> {
       paused: { kind: 'user', reason: `q could not send the task: ${String(err)}` },
     })),
   )
+}
+
+/**
+ * Sends a waiting task at once (n), whatever the queue is doing: into Claude's
+ * running turn as a row it reads at its next step, or as a turn of its own when
+ * Claude is idle, even while the queue is paused. Either way it is done once sent.
+ */
+async function sendNow($: $, id: string): Promise<void> {
+  const d = await read($, data)
+  const item = d.items.find(i => i.id === id)
+  if (!item || (item.status !== 'queued' && item.status !== 'proposed')) return
+  if (parseCommand(item.text)) {
+    $.ui.toast('q: a slash command cannot be sent into a turn; r runs it next')
+
+    return
+  }
+
+  const isRepo = (await repoRoot($)) !== null
+  if (d.isBusy) {
+    const text = nowPrompt(item, true, isRepo)
+    const appended = await $.session
+      .append({ message: { type: 'user', content: [{ type: 'text', text }] } })
+      .catch(err => ({ deny: String(err) }))
+    if (appended.deny !== undefined) {
+      $.ui.toast(`q: could not send #${id.slice(1)} into the turn, it stays queued: ${appended.deny}`)
+
+      return
+    }
+    await mutate($, x => markDone(x, id))
+    $.ui.toast(`q: sent #${id.slice(1)} into Claude's turn`)
+
+    return
+  }
+
+  // isBusy holds the queue back until this turn ends, as pump's own claim does.
+  await mutate($, x => ({ ...markDone(x, id), isBusy: true }))
+  const text = nowPrompt(item, false, isRepo)
+  const sent = item.source === 'you' ? $.prompt.submit({ text, asUser: true }) : $.prompt.submit({ text })
+  sent.catch(err => {
+    $.ui.toast(`q: could not send #${id.slice(1)}, it stays queued: ${String(err)}`)
+
+    return mutate($, x => ({ ...x, isBusy: false, items: x.items.map(i => (i.id === id ? { ...i, status: item.status } : i)) }))
+  })
 }
 
 /** How long a skill's turn may take to start before the queue pauses and says so. */
@@ -860,6 +905,15 @@ async function handleAction($: $, action: string): Promise<void> {
     }
     case 'run-next':
       await onCursor(runNext)
+      break
+    case 'send-now': {
+      const at = cursorOf(await read($, data))
+      if (at) await sendNow($, at.id)
+      break
+    }
+    case 'mark-done':
+      await onCursor(markDone)
+      later($, () => pump($))
       break
     case 'approve':
       await onCursor(approveItem)
@@ -1556,6 +1610,8 @@ export const register: Register = on => {
             { action: 'move-up', key: hasList ? 'K' : 'w', label: 'move up' },
             { action: 'move-down', key: hasList ? 'J' : 's', label: 'move down' },
             { action: 'run-next', key: 'r', label: 'run next' },
+            { action: 'send-now', key: 'n', label: 'send now' },
+            { action: 'mark-done', key: 'x', label: 'mark done' },
             { action: 'approve', key: 'y', label: 'approve' },
             { action: 'fork-session', key: 'f', label: 'fork session' },
             { action: 'fork-agent', key: 'a', label: 'fork agent' },

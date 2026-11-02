@@ -19,6 +19,7 @@ import {
   keepsFocus,
   moveItem,
   moveToPosition,
+  markDone,
   focusTarget,
   refocusTarget,
   removeFork,
@@ -54,6 +55,28 @@ describe('queue logic', () => {
     expect(moveItem(d, 'i3', -1).items.map(i => i.text)).toEqual(['a', 'c', 'b'])
     expect(moveItem(d, 'i2', -1).items.map(i => i.text)).toEqual(['a', 'b', 'c'])
     expect(runNext(d, 'i3').items.map(i => i.text)).toEqual(['a', 'c', 'b'])
+  })
+
+  test('marking done skips a waiting item, frees the running one, and leaves a pause and done items alone', () => {
+    let d = EMPTY
+    for (const t of ['a', 'b']) d = addItem(d, t, 'you').data
+    const paused = { kind: 'question', reason: 'Claude asked: which?' } as const
+    d = {
+      ...d,
+      runningId: 'i1',
+      runningTurnId: 't1',
+      paused,
+      items: d.items.map(i => (i.id === 'i1' ? { ...i, status: 'running' } : i)),
+    }
+
+    const skipped = markDone(d, 'i2')
+    expect(skipped.items.map(i => i.status)).toEqual(['running', 'done'])
+    expect(skipped.runningId).toBe('i1')
+
+    const freed = markDone(d, 'i1')
+    expect(freed.items.map(i => i.status)).toEqual(['done', 'queued'])
+    expect([freed.runningId, freed.runningTurnId, freed.paused]).toEqual([null, null, paused])
+    expect(markDone(freed, 'i1')).toBe(freed)
   })
 
   test('moving to a position counts waiting items only, clamps past the end, and approves nothing', () => {
@@ -161,6 +184,9 @@ describe('list keys', () => {
     expect(actionOf({ key: 'd' })).toBe('delete')
     expect(actionOf({ key: 'D' })).toBeUndefined()
     expect(actionOf({ key: 'k', ctrl: true })).toBeUndefined()
+    expect(actionOf({ key: 'x' })).toBe('mark-done')
+    expect(actionOf({ key: 'n' })).toBe('send-now')
+    expect(actionOf({ key: 'N' })).toBeUndefined()
   })
 })
 
@@ -1010,5 +1036,80 @@ describe('the mod', () => {
     expect(await move(1, 2)).toMatch(/#1 is running/)
     expect(await move(9, 1)).toMatch(/no task #9/)
     expect(await move(2, 0)).toMatch(/1 or more/)
+  })
+
+  /** Presses one of the pane's actions on the row the cursor reaches after `down` steps. */
+  const pressOn = async ($: Engine, action: string, down = 0) => {
+    const ui = await $.ui.mount({ plugin: 'q', surface: 'terminal', component: 'Pane', requestId: 'q', props: PANE_PROPS })
+    for (let n = 0; n < down; n++) await ui.press({ key: 'cursor-down' })
+    await ui.press({ key: action })
+    await ui.unmount()
+  }
+
+  test('x marks the running task done without ending its turn; the next task goes once the turn ends', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const sent = turns(on)
+    for (const t of ['a', 'b', 'c']) await runQ($, t)
+    await clock.advance(10)
+    await $.turn.start({ text: sent[0], turnId: 't1' } as never)
+
+    await pressOn($, 'mark-done')
+    await pressOn($, 'mark-done', 1)
+    await clock.advance(10)
+    expect(await listed($)).toContain('[done] (you) a')
+    expect(await listed($)).toContain('[done] (you) b')
+    expect(sent.length).toBe(1)
+
+    await $.turn.complete({ answer: 'ok', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' } as never)
+    await clock.advance(10)
+    expect(sent.length).toBe(2)
+    expect(sent[1]).toContain('\nc\n')
+  })
+
+  test('n sends a waiting task into the running turn, and keeps it queued if the append is refused', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const sent = turns(on)
+    const appended: string[] = []
+    let isRefused = false
+    on('session.append', (_, e, next) => {
+      if (isRefused) return { deny: 'policy' } as never
+      appended.push(String((e.message.content[0] as { text?: string }).text))
+
+      return next(e)
+    })
+    for (const t of ['a', 'b', 'c']) await runQ($, t)
+    await clock.advance(10)
+    await $.turn.start({ text: sent[0], turnId: 't1' } as never)
+
+    await pressOn($, 'send-now', 2)
+    expect(appended.length).toBe(1)
+    expect(appended[0]).toContain('which the user sent into your current turn')
+    expect(appended[0]).toContain('\nc\n')
+    expect(await listed($)).toContain('[done] (you) c')
+    expect(await listed($)).toContain('[running] (you) a')
+
+    isRefused = true
+    await pressOn($, 'send-now', 1)
+    expect(await listed($)).toContain('[queued] (you) b')
+  })
+
+  test('n with Claude idle sends the task as a turn of its own, even while the queue is paused', async ($, on) => {
+    const clock = mock.clock(on)
+    mock.store(on)
+    const sent = turns(on)
+    await pressOn($, 'pause')
+    for (const t of ['a', 'b']) await runQ($, t)
+    await clock.advance(10)
+    expect(sent.length).toBe(0)
+
+    await pressOn($, 'send-now', 1)
+    await clock.advance(10)
+    expect(sent.length).toBe(1)
+    expect(sent[0]).toContain('which the user sent ahead of the queue')
+    expect(sent[0]).toContain('\nb\n')
+    expect(await listed($)).toContain('[done] (you) b')
+    expect(await listed($)).toContain('[queued] (you) a')
   })
 })
