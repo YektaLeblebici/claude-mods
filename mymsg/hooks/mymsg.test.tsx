@@ -82,11 +82,11 @@ const output = async ($: Engine, surface: Surface, requestId: string, command: s
   } as never)).unmount()
 
 // A stored row, as the engine appends it.
-const store = ($: Engine, uuid: string, door: string, extra: { name?: string; agentId?: string; type?: string } = {}) =>
+const store = ($: Engine, uuid: string, door: string, extra: { name?: string; agentId?: string; type?: string; origin?: object } = {}) =>
   $.session.append({
     message: { type: extra.type ?? 'user', role: 'user', name: extra.name, content: [{ type: 'text', text: uuid }] },
     door,
-    origin: { kind: 'composer' },
+    origin: extra.origin ?? { kind: 'composer' },
     uuid,
     agentId: extra.agentId,
   } as never)
@@ -161,6 +161,33 @@ describe('which rows become entries', () => {
     expect(await texts(ui)).toEqual(['/review 12', '/cost'])
   })
 
+  test('opening this pane is not listed', async ($, on) => {
+    engine(on)
+    await store($, 'o1', 'command', { type: 'system', name: 'local_command' })
+    await output($, 'terminal', 'o1', 'mymsg')
+    await output($, 'terminal', 'o2', 'cost')
+    const ui = await open($, 'terminal')
+    await ui.press({ key: 'top' })
+    expect(await texts(ui)).toEqual(['/cost'])
+  })
+
+  for (const origin of [{ kind: 'plugin', name: 'q' }, { kind: 'peer', from: 'x' }, { kind: 'sdk' }]) {
+    test(`a command run by ${origin.kind}, not the person, is not listed, drawn before or after it is stored`, async ($, on) => {
+      engine(on)
+      await store($, 'u1', 'prompt')
+      await draw($, 'terminal', 'u1', 'typed')
+      await output($, 'terminal', 'o1', 'code-review', 'high')
+      await store($, 'o1', 'command', { type: 'system', name: 'local_command', origin })
+      await store($, 'o2', 'command', { type: 'system', name: 'local_command', origin })
+      await output($, 'terminal', 'o2', 'compact')
+      await store($, 'o3', 'command', { type: 'system', name: 'local_command', origin: { kind: 'bridge' } })
+      await output($, 'terminal', 'o3', 'cost')
+      const ui = await open($, 'terminal')
+      await ui.press({ key: 'top' })
+      expect(await texts(ui)).toEqual(['typed', '/cost'])
+    })
+  }
+
   test('a message that starts with a path is a message, not a command', async ($, on) => {
     engine(on)
     await draw($, 'terminal', 'u1', '/Users/me/file.ts is broken')
@@ -182,7 +209,7 @@ describe('which rows become entries', () => {
 describe('order', () => {
   test('stored rows keep conversation order however late they are drawn', async ($, on) => {
     engine(on)
-    // As in a session: prompts, /mymsg runs and a message sent mid-turn, each
+    // As in a session: prompts, commands and a message sent mid-turn, each
     // stored in turn; fullscreen then draws the newest rows first.
     await store($, 'a', 'prompt')
     await store($, 'o1', 'command', { type: 'system', name: 'local_command' })
@@ -191,14 +218,14 @@ describe('order', () => {
     await store($, 'o2', 'command', { type: 'system', name: 'local_command' })
     await store($, 'c', 'prompt')
     await draw($, 'terminal', 'c', 'latest ask')
-    await output($, 'terminal', 'o2', 'mymsg')
+    await output($, 'terminal', 'o2', 'cost')
     await draw($, 'terminal', 'q', 'said mid-turn')
     await draw($, 'terminal', 'b', 'second ask')
-    await output($, 'terminal', 'o1', 'mymsg')
+    await output($, 'terminal', 'o1', 'cost')
     await draw($, 'terminal', 'a', 'first ask')
     const ui = await open($, 'terminal')
     await ui.press({ key: 'bottom' })
-    expect(await texts(ui)).toEqual(['first ask', '/mymsg', 'second ask', 'said mid-turn', '/mymsg', 'latest ask'])
+    expect(await texts(ui)).toEqual(['first ask', '/cost', 'second ask', 'said mid-turn', '/cost', 'latest ask'])
     expect(await cursorAt(ui)).toBe(5)
   })
 
@@ -235,11 +262,11 @@ describe('order', () => {
       { role: 'user', text: 'old three' },
     ])
     await draw($, 'terminal', 'h1', 'old one')
-    await output($, 'terminal', 'h2', 'mymsg')
+    await output($, 'terminal', 'h2', 'cost')
     await draw($, 'terminal', 'h3', 'old three')
     const ui = await open($, 'terminal')
     await ui.press({ key: 'top' })
-    expect(await texts(ui)).toEqual(['old one', '/mymsg', 'old three'])
+    expect(await texts(ui)).toEqual(['old one', '/cost', 'old three'])
   })
 
   test('a subagent’s rows do not take a place', async ($, on) => {
@@ -407,7 +434,7 @@ const four = async ($: Engine) => {
   for (const [id] of said) await store($, id!, 'prompt')
   await store($, 'o', 'command', { type: 'system', name: 'local_command' })
   for (const [id, text] of said) await draw($, 'terminal', id!, text!)
-  await output($, 'terminal', 'o', 'mymsg')
+  await output($, 'terminal', 'o', 'cost')
   return open($, 'terminal')
 }
 
@@ -571,7 +598,7 @@ describe('copy', () => {
     const ui = await four($)
     await ui.press({ key: 'bottom' })
     await ui.press({ key: 'copy' })
-    expect(seen.copies).toEqual(['/mymsg'])
+    expect(seen.copies).toEqual(['/cost'])
   })
 
   test('a copy that did not reach a clipboard says why', async ($, on) => {

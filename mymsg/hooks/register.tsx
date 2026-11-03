@@ -7,6 +7,7 @@ const PANE = 'mymsg'
 const prompts = atom({ plugin: 'mymsg', key: 'prompts' } as const, [])
 const cursor = atom({ plugin: 'mymsg', key: 'cursor' } as const, 0)
 const order = atom({ plugin: 'mymsg', key: 'order' } as const, {})
+const others = atom({ plugin: 'mymsg', key: 'others' } as const, {})
 const query = atom({ plugin: 'mymsg', key: 'query' } as const, '')
 const field = atom({ plugin: 'mymsg', key: 'field' } as const, '')
 
@@ -35,10 +36,13 @@ const note = (prompt: Prompt) => {
   if (prompt.id !== PLACEHOLDER && !seen.some(one => one.id === prompt.id)) seen.push(prompt)
 }
 
+// A command's output row may draw before its stored row says who ran it, so
+// rows of commands the person did not run are left out here, not when seen.
 const all = async ($: EngineInterface) => {
-  const list = (await read($, prompts)).filter(one => one.id !== PLACEHOLDER)
+  const theirs = await read($, others)
+  const list = (await read($, prompts)).filter(one => one.id !== PLACEHOLDER && !theirs[one.id])
   for (const one of seen) {
-    if (!list.some(known => known.id === one.id)) list.push(one)
+    if (!theirs[one.id] && !list.some(known => known.id === one.id)) list.push(one)
   }
   return list
 }
@@ -167,6 +171,7 @@ export const register: Register = on => {
       synced = 0
       await update($, prompts, () => [])
       await update($, order, () => ({}))
+      await update($, others, () => ({}))
       await update($, cursor, () => 0)
       await update($, query, () => '')
       await update($, field, () => '')
@@ -196,6 +201,11 @@ export const register: Register = on => {
     if (isEntry && e.agentId === undefined) {
       await update($, order, at => (at[e.uuid] === undefined ? { ...at, [e.uuid]: Object.keys(at).length } : at))
     }
+    // Only a stored row says who ran a command; older history never does, so
+    // its commands stay listed.
+    if (e.door === 'command' && !PERSON.has(e.origin.kind)) {
+      await update($, others, at => ({ ...at, [e.uuid]: true }))
+    }
 
     return stored
   }).catch(($, e, next) => next(e))
@@ -208,9 +218,9 @@ export const register: Register = on => {
   }).catch(($, e, next) => next(e))
 
   // A command's echo is only ever drawn as a placeholder; its output row is
-  // what can be scrolled to.
+  // what can be scrolled to. Opening this pane is not an entry of its own.
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
-    note({ id: e.requestId, text: oneLine(`/${e.props.command} ${e.props.args}`), isCommand: true })
+    if (e.props.command !== PANE) note({ id: e.requestId, text: oneLine(`/${e.props.command} ${e.props.args}`), isCommand: true })
 
     return next(e)
   }).catch(($, e, next) => next(e))

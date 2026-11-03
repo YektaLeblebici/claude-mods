@@ -224,8 +224,8 @@ In a long session, finding what you asked an hour ago means scrolling back throu
 | `c` | Copies the whole message under the cursor. |
 | `h` | Closes the pane. |
 
-- **Your messages only:** prompts, messages sent mid-turn and slash commands, not Claude's
-  replies or subagents' prompts.
+- **Your messages only:** prompts, messages sent mid-turn and the slash commands you ran, not
+  Claude's replies, subagents' prompts, commands Claude or another mod ran, or `/mymsg` itself.
 - **Survives a reload,** and `/clear` starts the list over.
 - On the mobile app there is no text field, so search and go to are left out.
 
