@@ -18,6 +18,11 @@
       "name": "clawd-rpg",
       "source": "./clawd-rpg",
       "description": "Claude RPG: a passive pixel-art RPG that Claude Code plays for you while you work"
+    },
+    {
+      "name": "mymsg",
+      "source": "./mymsg",
+      "description": "/mymsg lists your prompts of this session in a pane and jumps to any of them in the transcript"
     }
   ],
   "description": "Personal Claude Code plugins"

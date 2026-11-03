@@ -1,14 +1,15 @@
 # claude-mods
 
-Three small mods for [Claude Code](https://claude.com/claude-code): a task queue so you can keep
-asking while Claude works, a tiny RPG that plays itself while you code, and an emoji on every
-session title.
+Four small mods for [Claude Code](https://claude.com/claude-code): a task queue so you can keep
+asking while Claude works, a tiny RPG that plays itself while you code, an emoji on every
+session title, and a list of your own messages to jump back to.
 
 | Mod | In one line |
 | --- | --- |
 | [**q**](#q-a-task-queue) | Line up prompts; each runs only when the one before it has finished. |
 | [**Claude RPG**](#claude-rpg) | Clawd adventures, fights and levels up as you work. |
 | [**emoji-title**](#emoji-title) | `fix flaky login test` becomes `🐛 fix flaky login test`. |
+| [**mymsg**](#mymsg) | Lists what you asked this session; jump to any of it in the transcript. |
 
 ## Contents
 
@@ -19,6 +20,7 @@ session title.
   - [How the game plays](#how-the-game-plays)
   - [Commands](#commands)
 - [emoji-title](#emoji-title)
+- [mymsg](#mymsg)
 - [For developers](#for-developers)
 
 ## Getting the mods
@@ -29,6 +31,7 @@ At a Claude Code prompt, install the ones you want:
 /plugin install q --marketplace YektaLeblebici/claude-mods
 /plugin install clawd-rpg --marketplace YektaLeblebici/claude-mods
 /plugin install emoji-title --marketplace YektaLeblebici/claude-mods
+/plugin install mymsg --marketplace YektaLeblebici/claude-mods
 ```
 
 Answer `y` to add the marketplace, then pick a scope (**user** puts it in every project). Run
@@ -197,6 +200,35 @@ Gives every Claude Code session title one fitting emoji, so your session list in
 
 How it works, what it costs and its limits: [emoji-title/README.md](emoji-title/README.md).
 
+## mymsg
+
+In a long session, finding what you asked an hour ago means scrolling back through every reply.
+`/mymsg` opens a pane that lists only your own messages, numbered, and takes you to any of them:
+
+```
+ My messages
+  1 fix the flaky login test
+  2 now make the retry helper shared
+  3 /code-review high
+  4 why does CI still time out on the e2e job?
+ down  up  top  bottom  jump  search  go to  copy  close
+```
+
+| Key | What it does |
+| --- | --- |
+| `j` / `k` | Moves the cursor down / up. |
+| `l` or a click | Jumps the transcript to that message. |
+| `t` / `b` | Jumps to the first / last message. |
+| `s` | Searches; only messages containing the text stay listed, numbers unchanged. |
+| `g` | Goes to a message by its number. |
+| `c` | Copies the whole message under the cursor. |
+| `h` | Closes the pane. |
+
+- **Your messages only:** prompts, messages sent mid-turn and slash commands, not Claude's
+  replies or subagents' prompts.
+- **Survives a reload,** and `/clear` starts the list over.
+- On the mobile app there is no text field, so search and go to are left out.
+
 ## For developers
 
 Each mod is a folder in this repository, listed in `.claude-plugin/marketplace.json`. To work on
@@ -213,5 +245,6 @@ Tests:
 ```sh
 claude plugin test q
 claude plugin test clawd-rpg
+claude plugin test mymsg
 cd emoji-title && python3 -I tests/test_emoji_title.py
 ```
