@@ -226,7 +226,8 @@ In a long session, finding what you asked an hour ago means scrolling back throu
 
 - **Your messages only:** prompts, messages sent mid-turn and the slash commands you ran, not
   Claude's replies, subagents' prompts, commands Claude or another mod ran, or `/mymsg` itself.
-- **Survives a reload,** and `/clear` starts the list over.
+- **Survives a reload,** and `/clear` or `/resume` starts the list over, so another session's
+  messages never show.
 - On the mobile app there is no text field, so search and go to are left out.
 
 ## For developers

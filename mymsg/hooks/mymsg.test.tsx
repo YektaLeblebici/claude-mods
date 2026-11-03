@@ -195,15 +195,25 @@ describe('which rows become entries', () => {
     expect(await texts(ui)).toEqual(['/Users/me/file.ts is broken'])
   })
 
-  test('/clear starts the list over', async ($, on) => {
-    engine(on)
-    await store($, 'u1', 'prompt')
-    await draw($, 'terminal', 'u1', 'before clear')
-    await ($.session.end as (e: never) => Promise<unknown>)({ reason: 'clear', sessionId: 's', resume: { id: 's' } } as never).catch(() => undefined)
-    const ui = await open($, 'terminal')
-    await ui.press({ key: 'top' })
-    expect(await texts(ui)).toEqual([])
-  })
+  // The process goes on under another session after both, which must not
+  // list the ended one's messages.
+  for (const reason of ['clear', 'resume'] as const) {
+    test(`a ${reason} starts the list over for the next session`, async ($, on) => {
+      engine(on)
+      await store($, 'a1', 'prompt')
+      await draw($, 'terminal', 'a1', 'from the ended session')
+      await output($, 'terminal', 'a2', 'cost')
+      await ($.session.end as (e: never) => Promise<unknown>)({ reason, sessionId: 'a', resume: { id: 'a' } } as never).catch(() => undefined)
+      const before = await open($, 'terminal')
+      expect(await texts(before)).toEqual([])
+      await before.unmount()
+      await store($, 'b1', 'prompt')
+      await draw($, 'terminal', 'b1', 'from the next session')
+      const ui = await open($, 'terminal')
+      await ui.press({ key: 'top' })
+      expect(await texts(ui)).toEqual(['from the next session'])
+    })
+  }
 })
 
 describe('order', () => {

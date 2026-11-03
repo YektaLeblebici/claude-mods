@@ -165,17 +165,17 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // After /clear or /resume the process goes on under another session, which
+  // must not list the ended one's messages; on an exit the reset costs nothing.
   on('session.end', async ($, e, next) => {
-    if (e.reason === 'clear') {
-      seen = []
-      synced = 0
-      await update($, prompts, () => [])
-      await update($, order, () => ({}))
-      await update($, others, () => ({}))
-      await update($, cursor, () => 0)
-      await update($, query, () => '')
-      await update($, field, () => '')
-    }
+    seen = []
+    synced = 0
+    await update($, prompts, () => [])
+    await update($, order, () => ({}))
+    await update($, others, () => ({}))
+    await update($, cursor, () => 0)
+    await update($, query, () => '')
+    await update($, field, () => '')
 
     return next(e)
   }).catch(($, e, next) => next(e))
