@@ -1,2 +1,4 @@
 __pycache__/
 *.pyc
+# Claude Code work folders (worktrees, local settings): never part of the repo.
+.claude/
