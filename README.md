@@ -229,6 +229,8 @@ In a long session, finding what you asked an hour ago means scrolling back throu
 - **Survives a reload,** and `/clear` or `/resume` starts the list over, so another session's
   messages never show.
 - On the mobile app there is no text field, so search and go to are left out.
+- **Needs `python3`** to read the session's transcript for the messages' order; without it,
+  messages are placed by their text in the conversation.
 
 ## For developers
 
@@ -248,4 +250,5 @@ claude plugin test q
 claude plugin test clawd-rpg
 claude plugin test mymsg
 cd emoji-title && python3 -I tests/test_emoji_title.py
+cd mymsg && python3 -I tests/test_transcript.py
 ```

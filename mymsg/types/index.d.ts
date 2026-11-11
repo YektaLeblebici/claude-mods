@@ -6,9 +6,9 @@ declare module 'claude-code' {
       prompts: Prompt[]
       // Index into the rows shown (the filtered list).
       cursor: number
-      // Stored row id -> its place among the rows appended while loaded.
+      // Stored row id -> its place in the session's transcript.
       order: Record<string, number>
-      // Stored rows of commands the person did not run (Claude, a plugin, a peer).
+      // Output rows of commands the person did not run (Claude, a plugin, a peer).
       others: Record<string, true>
       // The search text; rows not containing it are hidden.
       query: string

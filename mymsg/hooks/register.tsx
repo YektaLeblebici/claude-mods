@@ -16,6 +16,9 @@ const ROW = 'msg:'
 const FIND = 'find'
 const NUMBER = 'number'
 const REFRESH_MS = 500
+// Timer syncs in a row that may each still find a drawn row unstored.
+const RETRIES = 10
+const SESSION = /^[\w-]+$/
 
 // The id of a row drawn before its message is stored (a prompt just sent, a
 // slash command's echo); the stored row is drawn again under its own id.
@@ -31,27 +34,71 @@ type Row = { prompt: Prompt; n: number }
 let seen: Prompt[] = []
 // How many of `seen` the last sync took in; the timer syncs when more arrive.
 let synced = 0
+// Timer syncs since one last took in a new row.
+let retries = 0
+
+// Commands run while the mod is loaded whose output row has not drawn yet.
+let runs: { command: string; args: string; mine: boolean }[] = []
+// Each command output row drawn, and whether the person ran it.
+const ran = new Map<string, boolean>()
+// The session's transcript, read up to `offset`, and how many rows it placed.
+let transcript = { session: '', offset: 0, count: 0 }
 
 const note = (prompt: Prompt) => {
   if (prompt.id !== PLACEHOLDER && !seen.some(one => one.id === prompt.id)) seen.push(prompt)
 }
 
-// A command's output row may draw before its stored row says who ran it, so
-// rows of commands the person did not run are left out here, not when seen.
+// Only a run says who ran a command, and the transcript never does. An output
+// row takes the oldest run of its command still waiting; one with none (older
+// history, a resumed session) stays listed.
+const claim = (id: string, command: string, args: string) => {
+  if (ran.has(id)) return
+  const exact = runs.findIndex(run => run.command === command && run.args === args)
+  const at = exact !== -1 ? exact : runs.findIndex(run => run.command === command)
+  ran.set(id, at === -1 || runs.splice(at, 1)[0]!.mine)
+}
+
+const theirs = async ($: EngineInterface) => {
+  const stored = await read($, others)
+  return (id: string) => stored[id] === true || ran.get(id) === false
+}
+
 const all = async ($: EngineInterface) => {
-  const theirs = await read($, others)
-  const list = (await read($, prompts)).filter(one => one.id !== PLACEHOLDER && !theirs[one.id])
+  const isTheirs = await theirs($)
+  const list = (await read($, prompts)).filter(one => one.id !== PLACEHOLDER && !isTheirs(one.id))
   for (const one of seen) {
-    if (!theirs[one.id] && !list.some(known => known.id === one.id)) list.push(one)
+    if (!isTheirs(one.id) && !list.some(known => known.id === one.id)) list.push(one)
   }
   return list
 }
 
-// A drawn row's id is the id its stored row was appended under, and rows are
-// appended in conversation order, so that order places every entry stored
-// while the mod was loaded. Rows stored before then (older history, a resumed
-// session) come first, placed by their text in the conversation where it
-// matches, else kept where they were.
+// Reads what the transcript stored since the last read and numbers its rows
+// in that order. The transcript can be far over what `$.fs.read` takes, so a
+// script lists only the ids. Without python the order stays as text places it.
+const place = async ($: EngineInterface) => {
+  const session = await $.session.id().catch(() => '')
+  if (!SESSION.test(session)) return
+  if (session !== transcript.session) transcript = { session, offset: 0, count: 0 }
+  const { offset, count } = transcript
+  const done = await $.process
+    .run(['python3', '-I', `${$.plugin.root}/hooks/transcript.py`, session, `${offset}`])
+    .catch(() => undefined)
+  if (done?.exitCode !== 0) return
+  const [end, ...ids] = done.stdout.split('\n').filter(Boolean)
+  // Another sync read the same rows meanwhile, or the session changed.
+  if (transcript.session !== session || transcript.offset !== offset || !Number.isInteger(Number(end))) return
+  transcript = { session, offset: Number(end), count: count + ids.length }
+  await update($, order, at => {
+    const placed: Record<string, number> = offset === 0 ? {} : { ...at }
+    ids.forEach((id, i) => (placed[id] ??= count + i))
+    return placed
+  })
+}
+
+// A drawn row's id is the id of its row in the transcript, so the
+// transcript's order places every entry it stored. Rows it does not hold yet
+// (just sent, or no transcript read) come first, placed by their text in the
+// conversation where it matches, else kept where they were.
 const arrange = (list: Prompt[], at: Record<string, number>, texts?: string[]) => {
   const known = list.filter(one => at[one.id] !== undefined).sort((a, b) => at[a.id]! - at[b.id]!)
   const older = list.filter(one => at[one.id] === undefined)
@@ -85,6 +132,9 @@ const clamp = (rows: Row[], at: number) => Math.max(0, Math.min(rows.length - 1,
 
 const sync = async ($: EngineInterface) => {
   synced = seen.length
+  await place($)
+  const notMine = [...ran].filter(([, isMine]) => !isMine).map(([id]) => [id, true] as const)
+  if (notMine.length) await update($, others, at => ({ ...at, ...Object.fromEntries(notMine) }))
   const texts = await $.session
     .messages()
     .then(messages => messages.filter(one => one.role === 'user').map(one => oneLine(one.text)))
@@ -158,8 +208,17 @@ export const register: Register = on => {
       name: 'mymsg',
       description: 'List your messages of this session and jump to one',
     })
+    // A row can draw before the transcript stores it, so a sync that left one
+    // unplaced is tried again a few times.
     $.clock.every(REFRESH_MS, async () => {
-      if (seen.length !== synced) await sync($)
+      if (seen.length !== synced) retries = 0
+      else if (retries >= RETRIES) return
+      else {
+        const at = await read($, order)
+        if (seen.every(one => at[one.id] !== undefined)) return
+        retries++
+      }
+      await sync($)
     })
 
     return next(e)
@@ -170,6 +229,10 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     seen = []
     synced = 0
+    retries = 0
+    runs = []
+    ran.clear()
+    transcript = { session: '', offset: 0, count: 0 }
     await update($, prompts, () => [])
     await update($, order, () => ({}))
     await update($, others, () => ({}))
@@ -190,24 +253,11 @@ export const register: Register = on => {
     return { text: 'My messages: j/k move, l jump, t/b top/bottom, s search, g go to, c copy, h close' }
   })
 
-  // Rows a drawn entry can be: a prompt, a mid-turn message, a command's output.
-  on('session.append', async ($, e, next) => {
-    const stored = await next(e)
-    const isEntry =
-      e.door === 'prompt' ||
-      e.door === 'command' ||
-      e.door === 'delivery' ||
-      (e.door === 'attachment' && e.message.name === 'queued_command')
-    if (isEntry && e.agentId === undefined) {
-      await update($, order, at => (at[e.uuid] === undefined ? { ...at, [e.uuid]: Object.keys(at).length } : at))
-    }
-    // Only a stored row says who ran a command; older history never does, so
-    // its commands stay listed.
-    if (e.door === 'command' && !PERSON.has(e.origin.kind)) {
-      await update($, others, at => ({ ...at, [e.uuid]: true }))
-    }
+  // Every command runs before its output row draws; the row claims the run.
+  on('command.run', async ($, e, next) => {
+    if (e.command !== PANE) runs.push({ command: e.command, args: e.args, mine: PERSON.has(e.origin.kind) })
 
-    return stored
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   // The row's requestId is what $.ui.scroll takes to bring it into view.
@@ -220,7 +270,10 @@ export const register: Register = on => {
   // A command's echo is only ever drawn as a placeholder; its output row is
   // what can be scrolled to. Opening this pane is not an entry of its own.
   on('ui.render', { component: 'CommandOutput' }, async ($, e, next) => {
-    if (e.props.command !== PANE) note({ id: e.requestId, text: oneLine(`/${e.props.command} ${e.props.args}`), isCommand: true })
+    if (e.props.command !== PANE && e.requestId !== PLACEHOLDER) {
+      claim(e.requestId, e.props.command, e.props.args)
+      note({ id: e.requestId, text: oneLine(`/${e.props.command} ${e.props.args}`), isCommand: true })
+    }
 
     return next(e)
   }).catch(($, e, next) => next(e))
