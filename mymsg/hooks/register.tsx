@@ -16,8 +16,9 @@ const ROW = 'msg:'
 const FIND = 'find'
 const NUMBER = 'number'
 const REFRESH_MS = 500
-// Timer syncs in a row that may each still find a drawn row unstored.
-const RETRIES = 10
+// A drawn row the transcript does not hold is looked for again 1, 2, 4, 8 and
+// 16 timer ticks after the sync that missed it, then given up on.
+const RETRY_TICKS = 16
 const SESSION = /^[\w-]+$/
 
 // The id of a row drawn before its message is stored (a prompt just sent, a
@@ -34,8 +35,11 @@ type Row = { prompt: Prompt; n: number }
 let seen: Prompt[] = []
 // How many of `seen` the last sync took in; the timer syncs when more arrive.
 let synced = 0
-// Timer syncs since one last took in a new row.
-let retries = 0
+// Timer ticks since a sync last took in a new row.
+let ticks = 0
+// Drawn rows the transcript never held through every retry: a queued
+// message's preview, drawn under a new id each time. Not looked for again.
+const abandoned = new Set<string>()
 
 // Commands run while the mod is loaded whose output row has not drawn yet.
 let runs: { command: string; args: string; mine: boolean }[] = []
@@ -136,9 +140,17 @@ const shown = (list: Prompt[], text: string): Row[] => {
 
 const clamp = (rows: Row[], at: number) => Math.max(0, Math.min(rows.length - 1, at))
 
+const unplaced = async ($: EngineInterface) => {
+  const at = await read($, order)
+  return seen.filter(one => at[one.id] === undefined && !abandoned.has(one.id))
+}
+
+// Each read of the transcript starts a process, so a sync reads it only when
+// it never did this session or a drawn row still waits for its place; moving
+// through a placed list reads nothing.
 const sync = async ($: EngineInterface) => {
   synced = seen.length
-  await place($)
+  if (!transcript.session || (await unplaced($)).length) await place($)
   const notMine = [...ran].filter(([, isMine]) => !isMine).map(([id]) => [id, true] as const)
   if (notMine.length) await update($, others, at => ({ ...at, ...Object.fromEntries(notMine) }))
   const texts = await $.session
@@ -215,16 +227,16 @@ export const register: Register = on => {
       description: 'List your messages of this session and jump to one',
     })
     // A row can draw before the transcript stores it, so a sync that left one
-    // unplaced is tried again a few times.
+    // unplaced is tried again, less often each time.
     $.clock.every(REFRESH_MS, async () => {
-      if (seen.length !== synced) retries = 0
-      else if (retries >= RETRIES) return
+      if (seen.length !== synced) ticks = 0
       else {
-        const at = await read($, order)
-        if (seen.every(one => at[one.id] !== undefined)) return
-        retries++
+        ticks++
+        const isRetry = ticks <= RETRY_TICKS && (ticks & (ticks - 1)) === 0
+        if (!isRetry || !(await unplaced($)).length) return
       }
       await sync($)
+      if (ticks === RETRY_TICKS) for (const one of await unplaced($)) abandoned.add(one.id)
     })
 
     return next(e)
@@ -235,7 +247,8 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     seen = []
     synced = 0
-    retries = 0
+    ticks = 0
+    abandoned.clear()
     runs = []
     ran.clear()
     transcript = UNREAD

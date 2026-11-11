@@ -553,15 +553,41 @@ describe('refresh', () => {
     expect(seen.reads).toBe(reads + 1)
   })
 
-  test('a row the transcript never stores is looked for ten more times, then left', async ($, on) => {
+  test('a row the transcript never stores is looked for five more times, less often each time, then left', async ($, on) => {
     const clock = mock.clock(on)
     const seen = engine(on)
     await start($)
+    await store($, 'a')
     await draw($, 'terminal', 'a', 'one')
+    await draw($, 'terminal', 'w1', 'a queued preview')
     await clock.advance(500)
-    const reads = seen.reads
-    await clock.advance(20_000)
-    expect(seen.reads).toBe(reads + 10)
+    const runs = seen.argvs.length
+    const at = [] as number[]
+    for (let tick = 1; tick <= 40; tick++) {
+      await clock.advance(500)
+      if (seen.argvs.length > runs + at.length) at.push(tick)
+    }
+    expect(at).toEqual([1, 2, 4, 8, 16])
+    const ui = await open($, 'terminal')
+    for (const key of ['up', 'down', 'top']) await ui.press({ key })
+    expect(seen.argvs.length).toBe(runs + 5)
+    expect(await texts(ui)).toEqual(['one'])
+  })
+
+  test('moving through a list whose rows all have their place reads no transcript', async ($, on) => {
+    const seen = engine(on)
+    for (const id of ['a', 'b', 'c']) await store($, id)
+    for (const id of ['a', 'b', 'c']) await draw($, 'terminal', id, `ask ${id}`)
+    const ui = await open($, 'terminal')
+    await ui.press({ key: 'top' })
+    const runs = seen.argvs.length
+    for (const key of ['down', 'down', 'up', 'bottom', 'jump']) await ui.press({ key })
+    expect(seen.argvs.length).toBe(runs)
+    await store($, 'd')
+    await draw($, 'terminal', 'd', 'ask d')
+    await ui.press({ key: 'bottom' })
+    expect(seen.argvs.length).toBe(runs + 1)
+    expect(await texts(ui)).toEqual(['ask a', 'ask b', 'ask c', 'ask d'])
   })
 })
 
