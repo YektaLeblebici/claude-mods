@@ -22,10 +22,11 @@ function seeded(seed: number) {
 const on = (month: number, day: number, year = 2026) => new Date(year, month - 1, day, 12).getTime()
 const XMAS = BIOMES.find(b => b.id === 'christmas')!
 
-test('the Christmas season runs from November 15 to January 15, both days included', () => {
+test('the Christmas season runs from December 1 to January 15, both days included', () => {
   const season = XMAS.season!
-  expect(inSeason(season, on(11, 14))).toBe(false)
-  expect(inSeason(season, on(11, 15))).toBe(true)
+  expect(inSeason(season, on(11, 15))).toBe(false)
+  expect(inSeason(season, on(11, 30))).toBe(false)
+  expect(inSeason(season, on(12, 1))).toBe(true)
   expect(inSeason(season, on(12, 25))).toBe(true)
   expect(inSeason(season, on(1, 1, 2027))).toBe(true)
   expect(inSeason(season, on(1, 15, 2027))).toBe(true)

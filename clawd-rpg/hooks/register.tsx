@@ -121,7 +121,51 @@ async function load($: Engine): Promise<Save> {
   return read.save
 }
 
+/** How long a write waits for the save's lock, and when a lock a crashed session left is taken over. */
+const LOCK_WAIT_MS = 2000
+const LOCK_STALE_MS = 10_000
+const LOCK_POLL_MS = 20
+
+/** Where the save's lock lives: one directory every session on the machine can see, or null. */
+async function lockPath($: Engine): Promise<string | null> {
+  const config = (await $.env.get('CLAUDE_CONFIG_DIR').catch(() => undefined)) ?? (await $.env.get('HOME').catch(() => undefined))?.concat('/.claude')
+
+  return config ? `${config}/plugins/clawd-rpg.lock` : null
+}
+
+/**
+ * The save's lock across sessions: a directory, because making one is atomic and fails while it
+ * exists. Resolves the release, or null when it can't be had in LOCK_WAIT_MS (or at all, as where
+ * there is no mkdir): the caller then writes unlocked, as before.
+ */
+async function takeLock($: Engine): Promise<(() => Promise<void>) | null> {
+  const path = await lockPath($)
+  if (!path) return null
+  const run = (argv: string[]) => $.process.run(argv, { timeoutMs: 2000 })
+  const started = await $.clock.now()
+  for (;;) {
+    if ((await run(['mkdir', path])).exitCode === 0) {
+      return async () => {
+        await run(['rmdir', path])
+      }
+    }
+    // Not made: held by another session, or nowhere to make it.
+    const held = await $.fs.stat(path).catch(() => null)
+    if (!held) return null
+    const now = await $.clock.now()
+    // A session that crashed while holding it leaves it behind: past LOCK_STALE_MS it is taken over.
+    // File times are wall-clock time, so they are compared with the wall clock.
+    if (Date.now() - held.mtimeMs > LOCK_STALE_MS) {
+      await run(['rmdir', path])
+      continue
+    }
+    if (now - started > LOCK_WAIT_MS) return null
+    await $.clock.sleep(LOCK_POLL_MS)
+  }
+}
+
 const storeIO = ($: Engine): SaveIO => ({
+  lock: () => takeLock($),
   read: () => load($),
   peekRev: async () => revOf(await $.store.get(SAVE_KEY)),
   write: async save => {
@@ -141,6 +185,15 @@ const storeIO = ($: Engine): SaveIO => ({
  * (null) when the stored save is from a newer build. Gives back what was stored, read.
  */
 async function replaceSave($: Engine, save: Save, backupKey?: string) {
+  const release = await takeLock($).catch(() => null)
+  try {
+    return await replaceUnderLock($, save, backupKey)
+  } finally {
+    await release?.().catch(() => undefined)
+  }
+}
+
+async function replaceUnderLock($: Engine, save: Save, backupKey?: string) {
   const stored = await $.store.get(SAVE_KEY)
   const read = readSave(stored)
   if (read.kind === 'newer') {
@@ -229,19 +282,33 @@ let viewHere: View | null = null
 // drawn, so its animation idles until it is drawn again, whatever the engine reports about screens.
 let hasScreen = true
 let lastDrawnAt = Number.NEGATIVE_INFINITY
+// When an undrawn band last got its heartbeat frame.
+let lastHeartbeat = Number.NEGATIVE_INFINITY
 
 /** Starts or stops the animation clock: it runs in the full view, while a screen is attached. */
 function runClock($: Engine) {
   clock?.cancel()
-  clock =
-    view === 'show' && hasScreen
-      ? $.clock.every(FRAME_MS, () => {
-          void (async () => {
-            if ((await $.clock.now()) - lastDrawnAt > IDLE_MS) return
-            await update($, frameRef, n => (n ?? 0) + 1)
-          })()
-        })
-      : null
+  clock = view === 'show' && hasScreen ? $.clock.every(FRAME_MS, () => void nextFrame($)) : null
+}
+
+/**
+ * One frame. A band not drawn for IDLE_MS (the session in the background, or a redraw that never
+ * came) gets a heartbeat frame each IDLE_MS instead: little for a band nobody sees, and enough for
+ * one someone does to be drawn again and pick up, so a missed redraw never freezes it for good.
+ */
+async function nextFrame($: Engine) {
+  const now = await $.clock.now()
+  if (now - lastDrawnAt > IDLE_MS) {
+    if (now - lastHeartbeat < IDLE_MS) return
+    lastHeartbeat = now
+  }
+  await update($, frameRef, n => (n ?? 0) + 1)
+}
+
+/** Restarts the animation and draws a fresh frame: for /rpg show, even in the full view already. */
+function nudge($: Engine) {
+  runClock($)
+  void update($, frameRef, n => (n ?? 0) + 1)
 }
 
 /** A screen joined or left: re-read the screens and start or stop the clock to match. */
@@ -317,13 +384,19 @@ export const register: Register = on => {
     const [verb, scope] = arg.split(/\s+/)
     if ((verb === 'show' || verb === 'mini' || verb === 'hide') && (scope === undefined || scope === 'here')) {
       if (scope === 'here') {
-        if (viewHere === verb) return { text: `${VIEW_SAID[verb]} (Already this session's view.)` }
+        if (viewHere === verb) {
+          if (verb === 'show') nudge($)
+          return { text: `${VIEW_SAID[verb]} (Already this session's view.)` }
+        }
         viewHere = verb
         await $.state.set(viewHereRef, verb)
         await setView($, verb)
         return { text: `${VIEW_SAID[verb]} This session only; a plain /rpg ${shared} (or show, mini, hide) returns it to the shared default.` }
       }
-      if (shared === verb && viewHere === null) return { text: `${VIEW_SAID[verb]} (Already in that view.)` }
+      if (shared === verb && viewHere === null) {
+        if (verb === 'show') nudge($)
+        return { text: `${VIEW_SAID[verb]} (Already in that view.)` }
+      }
       shared = verb
       await $.store.set(VIEW_KEY, verb)
       if (viewHere !== null) {
@@ -440,8 +513,13 @@ export const register: Register = on => {
     const status = <Text wrap="truncate-end">{statusLine(save)}</Text>
     if (shown === 'mini' || e.props.maxRows < SCENE_ROWS + 1) return status
 
-    // Drawn now: the clock may bump frames for the next IDLE_MS.
+    // Drawn now: the clock may bump frames for the next IDLE_MS. Being drawn also proves a screen,
+    // so a clock the engine's screen report stopped starts again.
     lastDrawnAt = await $.clock.now()
+    if (!clock) {
+      hasScreen = true
+      runClock($)
+    }
     const { value: frame = 0 } = await $.state.get(frameRef)
     const { value: burst = null } = await $.state.get(burstRef)
     const line = save.log[save.log.length - 1]?.text ?? ''

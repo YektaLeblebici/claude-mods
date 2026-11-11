@@ -47,6 +47,79 @@ function sharedStore(start: Save, interloper?: (s: Save) => Save) {
   return { io, disk: () => disk!, writes: () => writes }
 }
 
+/**
+ * One store several sessions write to at once: every read, check and write gives the others a turn,
+ * and `lock`, when given, is a lock they share.
+ */
+function racingStore(start: Save, isLocked: boolean) {
+  let disk: Save = start
+  const turn = async () => {
+    for (let i = 0; i < 3; i++) await Promise.resolve()
+  }
+  let held: Promise<void> = Promise.resolve()
+  const lock = async () => {
+    let free!: () => void
+    const mine = new Promise<void>(resolve => (free = resolve))
+    const before = held
+    held = before.then(() => mine)
+    await before
+    return async () => free()
+  }
+  const io: SaveIO = {
+    read: async () => (await turn(), disk),
+    peekRev: async () => (await turn(), revOf(disk)),
+    write: async s => {
+      await turn()
+      disk = s
+    },
+    ...(isLocked ? { lock } : {}),
+  }
+  return { io, disk: () => disk }
+}
+
+test('with the lock, five sessions writing at once all keep their change', async () => {
+  const store = racingStore({ ...newSave(always(0.5)), rev: 1 }, true)
+  await Promise.all(Array.from({ length: 5 }, () => mutate(store.io, levelUp)))
+  expect(store.disk().hero.level).toBe(6)
+  expect(store.disk().rev).toBe(6)
+})
+
+test('without the lock, the same race loses changes: why the lock is taken', async () => {
+  const store = racingStore({ ...newSave(always(0.5)), rev: 1 }, false)
+  await Promise.all(Array.from({ length: 5 }, () => mutate(store.io, levelUp)))
+  expect(store.disk().hero.level < 6).toBe(true)
+})
+
+test('the save is locked across sessions with a directory: made before writing, removed after', async ($, on) => {
+  const clock = mock.clock(on)
+  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 } }
+  engineStart(on)
+  diskStore(on, disk)
+  mock.env(on, { HOME: '/home/x' })
+  const dirs = new Set<string>()
+  const ran: string[] = []
+  on('process.run', (_$, e) => {
+    const [cmd, path] = e.argv as string[]
+    ran.push(`${cmd} ${path}`)
+    if (cmd === 'mkdir' && dirs.has(path!)) return { value: { exitCode: 1, stdout: '', stderr: 'File exists' } } as never
+    if (cmd === 'mkdir') dirs.add(path!)
+    if (cmd === 'rmdir') dirs.delete(path!)
+    return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
+  })
+  // A lock a crashed session left a minute ago: stale, so it is taken over.
+  const LOCK = '/home/x/.claude/plugins/clawd-rpg.lock'
+  dirs.add(LOCK)
+  on('fs.stat', (_$, e) => (dirs.has(e.path) ? ({ value: { kind: 'dir', size: 0, mtimeMs: Date.now() - 60_000 } } as never) : (() => { throw new Error('ENOENT') })()))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: { stdout: '', stderr: '', interrupted: false }, text: 'ok' }) as never)
+  await $.session.start(START)
+  await $.tool.call({ tool: 'Bash', command: 'true' })
+  await clock.settle()
+
+  expect((disk.save as Save).pendingLuck).toBe('lucky')
+  expect(ran).toEqual([`mkdir ${LOCK}`, `rmdir ${LOCK}`, `mkdir ${LOCK}`, `rmdir ${LOCK}`])
+  expect(dirs.has(LOCK)).toBe(false)
+})
+
 test('a change redoes itself on the save another session just wrote', async () => {
   const start = { ...newSave(always(0.5)), rev: 4 }
   const store = sharedStore(start, s => ({ ...s, hero: { ...s.hero, gold: 999 } }))

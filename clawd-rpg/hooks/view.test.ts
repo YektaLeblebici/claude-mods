@@ -184,16 +184,16 @@ function frameSpy(on: On) {
   return frames
 }
 
-test('the band animates only while it is drawn: it idles soon after drawing stops, and picks up when drawn again', async ($, on) => {
+test('the band animates while it is drawn; undrawn, it gets only a heartbeat, and picks up when drawn again', async ($, on) => {
   const clock = mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 }, view: 'show' }
   engine(on, disk)
   const frames = frameSpy(on)
   await $.session.start(START)
 
-  // Never drawn (a session in the background from the start): no frames at all.
+  // Never drawn (a session in the background from the start): only a heartbeat, a frame every 2 s.
   await clock.advance(3000)
-  expect(frames.length).toBe(0)
+  expect(frames.length >= 1 && frames.length <= 2).toBe(true)
 
   // Drawn: frames run while the band is on screen.
   const mounted = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
@@ -201,12 +201,12 @@ test('the band animates only while it is drawn: it idles soon after drawing stop
   const whileDrawn = frames.length
   expect(whileDrawn >= 3).toBe(true)
 
-  // Drawing stops (the session goes to the background): within the idle window, frames stop.
+  // Drawing stops (the session goes to the background): within the idle window, only heartbeats are left.
   await mounted.unmount()
   await clock.advance(2500)
   const settled = frames.length
-  await clock.advance(5000)
-  expect(frames.length).toBe(settled)
+  await clock.advance(6000)
+  expect(frames.length - settled <= 3).toBe(true)
 
   // Drawn again (back in the foreground): frames pick up.
   const again = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
@@ -215,27 +215,59 @@ test('the band animates only while it is drawn: it idles soon after drawing stop
   await again.unmount()
 })
 
-test('with no screen attached the clock stops; a screen attaching starts it, the last one leaving stops it', async ($, on) => {
+test('the clock follows the screens attached, and a band being drawn proves one', async ($, on) => {
   const clock = mock.clock(on)
   const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 }, view: 'show' }
   const seen = engine(on, disk)
   seen.screens = []
   const frames = frameSpy(on)
   await $.session.start(START)
-  const mounted = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
-  await clock.advance(1500)
+
+  // No screen and nothing drawn: no clock at all, not even a heartbeat.
+  await clock.advance(3000)
   expect(frames.length).toBe(0)
 
   seen.screens = ['terminal']
   await $.session.attach({ surface: 'terminal', clientId: 'terminal:default' } as never)
+  const mounted = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
   await clock.advance(1500)
   const attached = frames.length
-  expect(attached > 0).toBe(true)
+  expect(attached >= 3).toBe(true)
 
+  // The last screen leaves: the clock stops.
+  await mounted.unmount()
   seen.screens = []
   await $.session.detach({ surface: 'terminal', clientId: 'terminal:default', reason: 'detached' } as never)
-  await clock.advance(1500)
+  await clock.advance(3000)
   expect(frames.length).toBe(attached)
+
+  // The engine still reports no screen, but the band is being drawn: that proves one, and it animates.
+  const drawn = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
+  await clock.advance(1500)
+  expect(frames.length >= attached + 3).toBe(true)
+  await drawn.unmount()
+})
+
+test('/rpg show, even in the full view already, starts a frozen band again', async ($, on) => {
+  const clock = mock.clock(on)
+  const disk: Record<string, unknown> = { save: { ...newSave(always(0.5)), rev: 1 }, view: 'show' }
+  const seen = engine(on, disk)
+  const frames = frameSpy(on)
+  await $.session.start(START)
+  const mounted = await $.ui.mount({ plugin: 'clawd-rpg', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
+  await clock.advance(1000)
+
+  // The engine wrongly reports the screen gone while the band is still up: the band freezes.
+  seen.screens = []
+  await $.session.detach({ surface: 'terminal', clientId: 'terminal:default', reason: 'detached' } as never)
+  await clock.advance(1000)
+  const frozen = frames.length
+  await clock.advance(2000)
+  expect(frames.length).toBe(frozen)
+
+  expect((await run($, 'rpg', 'show')).text).toContain('Already in that view')
+  await clock.advance(1500)
+  expect(frames.length >= frozen + 3).toBe(true)
   await mounted.unmount()
 })
 

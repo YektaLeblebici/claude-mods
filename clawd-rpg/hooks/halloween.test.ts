@@ -31,7 +31,7 @@ test('the Halloween season runs from October 15 to November 15, both days includ
   expect(inSeason(season, on(11, 16))).toBe(false)
 })
 
-test('the seasonal worlds open on their own dates: Halloween in October, Christmas in December, both on November 15', () => {
+test('the seasonal worlds open on their own dates, never together: Halloween to November 15, Christmas from December 1', () => {
   const opens = (now: number) => {
     const rng = seeded(3)
     const seen = new Set<string>()
@@ -39,7 +39,9 @@ test('the seasonal worlds open on their own dates: Halloween in October, Christm
     return { halloween: seen.has('halloween'), christmas: seen.has('christmas') }
   }
   expect(opens(on(10, 31))).toEqual({ halloween: true, christmas: false })
-  expect(opens(on(11, 15))).toEqual({ halloween: true, christmas: true })
+  expect(opens(on(11, 15))).toEqual({ halloween: true, christmas: false })
+  expect(opens(on(11, 20))).toEqual({ halloween: false, christmas: false })
+  expect(opens(on(12, 1))).toEqual({ halloween: false, christmas: true })
   expect(opens(on(12, 10))).toEqual({ halloween: false, christmas: true })
   expect(opens(on(7, 1))).toEqual({ halloween: false, christmas: false })
 })

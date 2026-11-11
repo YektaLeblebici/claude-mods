@@ -378,7 +378,7 @@ export const BIOMES: Biome[] = [
   },
   {
     id: 'christmas',
-    season: { from: [11, 15], to: [1, 15] },
+    season: { from: [12, 1], to: [1, 15] },
     names: ['The Christmas Market', 'Mistletoe Hollow', 'The Gingerbread Quarter'],
     descs: [
       'Stalls glow with candles and the air smells of cinnamon and hot wine.',
