@@ -137,6 +137,7 @@ describe('which rows become entries', () => {
       engine(on)
       await draw($, surface, 'placeholder', 'hello')
       await draw($, surface, 'placeholder', '/mymsg')
+      await store($, 'u1')
       await draw($, surface, 'u1', 'hello')
       const ui = await open($, surface)
       await ui.press({ key: 'top' })
@@ -145,6 +146,7 @@ describe('which rows become entries', () => {
 
     test(`${surface}: a row drawn again lists once`, async ($, on) => {
       engine(on)
+      await store($, 'u1')
       await draw($, surface, 'u1', 'hello')
       await draw($, surface, 'u1', 'hello')
       const ui = await open($, surface)
@@ -155,6 +157,7 @@ describe('which rows become entries', () => {
 
   test('only the person’s own messages are listed', async ($, on) => {
     engine(on)
+    for (const id of ['u1', 'u2', 'n1', 'p1', 'e1']) await store($, id)
     await draw($, 'terminal', 'u1', 'typed', { kind: 'composer' })
     await draw($, 'terminal', 'u2', 'from the phone', { kind: 'bridge' })
     await draw($, 'terminal', 'n1', 'task done', { kind: 'task-notification' })
@@ -167,6 +170,8 @@ describe('which rows become entries', () => {
 
   test('a command is listed from its output row as /name args', async ($, on) => {
     engine(on)
+    await store($, 'o1')
+    await store($, 'o2')
     await output($, 'terminal', 'o1', 'review', '12')
     await output($, 'terminal', 'o2', 'cost')
     const ui = await open($, 'terminal')
@@ -174,9 +179,37 @@ describe('which rows become entries', () => {
     expect(await texts(ui)).toEqual(['/review 12', '/cost'])
   })
 
+  test('a message queued while Claude works is listed once it is sent, not while it waits', async ($, on) => {
+    engine(on)
+    // The waiting preview draws under a new id each time and is never stored.
+    await draw($, 'terminal', 'w1', '/cost')
+    await draw($, 'terminal', 'w2', '/cost')
+    await draw($, 'terminal', 'w3', 'and this too')
+    const ui = await open($, 'terminal')
+    await ui.press({ key: 'top' })
+    expect(await texts(ui)).toEqual([])
+    await run($, 'cost', '', { kind: 'composer' })
+    await store($, 'o1')
+    await output($, 'terminal', 'o1', 'cost')
+    await store($, 'q1')
+    await draw($, 'terminal', 'q1', 'and this too')
+    await ui.press({ key: 'top' })
+    expect(await texts(ui)).toEqual(['/cost', 'and this too'])
+  })
+
+  test('without python every row drawn is listed', async ($, on) => {
+    const seen = engine(on)
+    seen.hasPython = false
+    await draw($, 'terminal', 'w1', 'not stored')
+    const ui = await open($, 'terminal')
+    await ui.press({ key: 'top' })
+    expect(await texts(ui)).toEqual(['not stored'])
+  })
+
   test('opening this pane is not listed', async ($, on) => {
     engine(on)
     await store($, 'o1')
+    await store($, 'o2')
     await output($, 'terminal', 'o1', 'mymsg')
     await output($, 'terminal', 'o2', 'cost')
     const ui = await open($, 'terminal')
@@ -207,6 +240,7 @@ describe('which rows become entries', () => {
 
   test('each output row takes the oldest run of its command, once however often it draws', async ($, on) => {
     engine(on)
+    for (const id of ['o1', 'o2', 'o3']) await store($, id)
     await run($, 'cost', '', { kind: 'plugin', name: 'q' })
     await run($, 'cost', '', { kind: 'composer' })
     await output($, 'terminal', 'o1', 'cost')
@@ -222,10 +256,15 @@ describe('which rows become entries', () => {
 
   test('a command’s output row with arguments it hides still takes its run', async ($, on) => {
     engine(on)
+    await store($, 'o1')
+    await store($, 'o2')
     await run($, 'login', 'secret', { kind: 'plugin', name: 'q' })
     await output($, 'terminal', 'o1', 'login', '***')
+    await run($, 'login', 'other', { kind: 'composer' })
+    await output($, 'terminal', 'o2', 'login', '***')
     const ui = await open($, 'terminal')
-    expect(await texts(ui)).toEqual([])
+    await ui.press({ key: 'top' })
+    expect(await texts(ui)).toEqual(['/login ***'])
   })
 
   test('a message that starts with a path is a message, not a command', async ($, on) => {
@@ -324,27 +363,13 @@ describe('order', () => {
 
   test('without python the rows are placed by their text in the conversation', async ($, on) => {
     const seen = engine(on, [
-      { role: 'user', text: 'one' },
-      { role: 'user', text: 'two' },
-    ])
-    seen.hasPython = false
-    await store($, 'a')
-    await store($, 'b')
-    await draw($, 'terminal', 'b', 'two')
-    await draw($, 'terminal', 'a', 'one')
-    const ui = await open($, 'terminal')
-    await ui.press({ key: 'top' })
-    expect(await texts(ui)).toEqual(['one', 'two'])
-  })
-
-  test('rows the transcript does not hold come first, in conversation order', async ($, on) => {
-    engine(on, [
       { role: 'user', text: 'old one' },
       { role: 'assistant', text: 'ok' },
       { role: 'user', text: '<command-name>/reload-plugins</command-name>\n<command-args></command-args>' },
       { role: 'user', text: 'The user sent a new message while you were working:\nold two' },
+      { role: 'user', text: 'new one' },
     ])
-    await store($, 'n')
+    seen.hasPython = false
     await draw($, 'terminal', 'n', 'new one')
     await draw($, 'terminal', 'h2', 'old two')
     await output($, 'terminal', 'h3', 'reload-plugins')
@@ -354,11 +379,12 @@ describe('order', () => {
     expect(await texts(ui)).toEqual(['old one', '/reload-plugins', 'old two', 'new one'])
   })
 
-  test('a history row the conversation does not match stays after its neighbour', async ($, on) => {
-    engine(on, [
+  test('without python a row the conversation does not match stays after its neighbour', async ($, on) => {
+    const seen = engine(on, [
       { role: 'user', text: 'old one' },
       { role: 'user', text: 'old three' },
     ])
+    seen.hasPython = false
     await draw($, 'terminal', 'h1', 'old one')
     await output($, 'terminal', 'h2', 'cost')
     await draw($, 'terminal', 'h3', 'old three')
@@ -367,15 +393,15 @@ describe('order', () => {
     expect(await texts(ui)).toEqual(['old one', '/cost', 'old three'])
   })
 
-  test('a subagent’s rows do not take a place', async ($, on) => {
+  test('a subagent’s rows are not listed', async ($, on) => {
     engine(on)
     await store($, 'sub', { agentId: 'agent-1' })
     await store($, 'a')
     await draw($, 'terminal', 'a', 'mine')
-    await draw($, 'terminal', 'sub', 'history row')
+    await draw($, 'terminal', 'sub', 'a subagent’s prompt')
     const ui = await open($, 'terminal')
     await ui.press({ key: 'top' })
-    expect(await texts(ui)).toEqual(['history row', 'mine'])
+    expect(await texts(ui)).toEqual(['mine'])
   })
 })
 

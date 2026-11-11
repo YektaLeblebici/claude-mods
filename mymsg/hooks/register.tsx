@@ -42,7 +42,8 @@ let runs: { command: string; args: string; mine: boolean }[] = []
 // Each command output row drawn, and whether the person ran it.
 const ran = new Map<string, boolean>()
 // The session's transcript, read up to `offset`, and how many rows it placed.
-let transcript = { session: '', offset: 0, count: 0 }
+const UNREAD = { session: '', offset: 0, count: 0, isRead: false }
+let transcript = UNREAD
 
 const note = (prompt: Prompt) => {
   if (prompt.id !== PLACEHOLDER && !seen.some(one => one.id === prompt.id)) seen.push(prompt)
@@ -63,11 +64,16 @@ const theirs = async ($: EngineInterface) => {
   return (id: string) => stored[id] === true || ran.get(id) === false
 }
 
+// Once the transcript was read, a row it does not hold is not listed: a
+// message queued while Claude works draws under a new id each time, and only
+// what is sent is stored. Without a read every row drawn is listed.
 const all = async ($: EngineInterface) => {
   const isTheirs = await theirs($)
-  const list = (await read($, prompts)).filter(one => one.id !== PLACEHOLDER && !isTheirs(one.id))
+  const at = transcript.isRead ? await read($, order) : undefined
+  const isListed = (id: string) => id !== PLACEHOLDER && !isTheirs(id) && (!at || at[id] !== undefined)
+  const list = (await read($, prompts)).filter(one => isListed(one.id))
   for (const one of seen) {
-    if (!isTheirs(one.id) && !list.some(known => known.id === one.id)) list.push(one)
+    if (isListed(one.id) && !list.some(known => known.id === one.id)) list.push(one)
   }
   return list
 }
@@ -78,7 +84,7 @@ const all = async ($: EngineInterface) => {
 const place = async ($: EngineInterface) => {
   const session = await $.session.id().catch(() => '')
   if (!SESSION.test(session)) return
-  if (session !== transcript.session) transcript = { session, offset: 0, count: 0 }
+  if (session !== transcript.session) transcript = { ...UNREAD, session }
   const { offset, count } = transcript
   const done = await $.process
     .run(['python3', '-I', `${$.plugin.root}/hooks/transcript.py`, session, `${offset}`])
@@ -87,7 +93,7 @@ const place = async ($: EngineInterface) => {
   const [end, ...ids] = done.stdout.split('\n').filter(Boolean)
   // Another sync read the same rows meanwhile, or the session changed.
   if (transcript.session !== session || transcript.offset !== offset || !Number.isInteger(Number(end))) return
-  transcript = { session, offset: Number(end), count: count + ids.length }
+  transcript = { session, offset: Number(end), count: count + ids.length, isRead: true }
   await update($, order, at => {
     const placed: Record<string, number> = offset === 0 ? {} : { ...at }
     ids.forEach((id, i) => (placed[id] ??= count + i))
@@ -96,9 +102,9 @@ const place = async ($: EngineInterface) => {
 }
 
 // A drawn row's id is the id of its row in the transcript, so the
-// transcript's order places every entry it stored. Rows it does not hold yet
-// (just sent, or no transcript read) come first, placed by their text in the
-// conversation where it matches, else kept where they were.
+// transcript's order places every entry it stored. Without a transcript read
+// the rows come first, placed by their text in the conversation where it
+// matches, else kept where they were.
 const arrange = (list: Prompt[], at: Record<string, number>, texts?: string[]) => {
   const known = list.filter(one => at[one.id] !== undefined).sort((a, b) => at[a.id]! - at[b.id]!)
   const older = list.filter(one => at[one.id] === undefined)
@@ -232,7 +238,7 @@ export const register: Register = on => {
     retries = 0
     runs = []
     ran.clear()
-    transcript = { session: '', offset: 0, count: 0 }
+    transcript = UNREAD
     await update($, prompts, () => [])
     await update($, order, () => ({}))
     await update($, others, () => ({}))
