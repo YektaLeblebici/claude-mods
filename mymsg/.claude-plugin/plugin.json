@@ -1,6 +1,6 @@
 {
   "name": "mymsg",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "/mymsg lists your prompts of this session in a pane; j/k move, l or click jumps there in the transcript",
   "types": "./types/index.d.ts"
 }

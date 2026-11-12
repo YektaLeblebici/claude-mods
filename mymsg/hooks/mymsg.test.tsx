@@ -28,7 +28,7 @@ const stored: string[] = []
 // "Could not jump" toast here: a toast is how a test sees a jump was made, and
 // the cursor (moved onto the target first) shows where to.
 const engine = (on: On, conversation: Said[] = []) => {
-  const seen = { toasts: [] as string[], closes: [] as string[], opens: [] as unknown[], reads: 0, copies: [] as string[], canCopy: true, hasPython: true, argvs: [] as string[][] }
+  const seen = { toasts: [] as string[], closes: [] as string[], opens: [] as unknown[], reads: 0, copies: [] as string[], canCopy: true, hasPython: true, argvs: [] as string[][], registers: [] as unknown[] }
   stored.length = 0
   // The transcript script, its offset counted in rows here.
   on('process.run', async (_$, e) => {
@@ -61,7 +61,7 @@ const engine = (on: On, conversation: Said[] = []) => {
   })
   on('ui.close', async (_$, e) => (seen.closes.push((e as { id: string }).id), { value: undefined }))
   on('ui.open', async (_$, e) => (seen.opens.push(e), { value: { isPlaced: true } }) as never)
-  on('command.register', async () => ({ value: { command: 'mymsg' } }))
+  on('command.register', async (_$, e) => (seen.registers.push(e), { value: { command: 'mymsg' } }) as never)
   on('session.start', async () => ({ cwd: '/' }))
   return seen
 }
@@ -130,6 +130,14 @@ const jumps = (seen: { toasts: string[] }) => seen.toasts.filter(one => one.incl
 
 const start = ($: Engine) =>
   ($.session.start as (e: never) => Promise<unknown>)({ cwd: '/', surface: 'terminal', isInteractive: true } as never)
+
+describe('opening', () => {
+  test('/mymsg runs at once while Claude works, not after the turn', async ($, on) => {
+    const seen = engine(on)
+    await start($)
+    expect(seen.registers).toContainEqual(expect.objectContaining({ name: 'mymsg', immediate: true }))
+  })
+})
 
 describe('which rows become entries', () => {
   for (const surface of SURFACES) {

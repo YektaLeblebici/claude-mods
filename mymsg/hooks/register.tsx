@@ -225,6 +225,9 @@ export const register: Register = on => {
     await $.command.register({
       name: 'mymsg',
       description: 'List your messages of this session and jump to one',
+      // Opening the pane while Claude works must not wait for the turn to end.
+      // A row the transcript has not stored yet is placed by the timer's retries.
+      immediate: true,
     })
     // A row can draw before the transcript stores it, so a sync that left one
     // unplaced is tried again, less often each time.
