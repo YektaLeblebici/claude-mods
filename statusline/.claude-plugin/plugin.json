@@ -1,0 +1,1 @@
+{"name": "statusline", "version": "0.5.0", "description": "A status line under the prompt: [Model Effort] ctx, 5h and 7d usage, reset countdowns, in the terminal's own palette colors", "types": "./types/index.d.ts"}

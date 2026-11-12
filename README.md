@@ -1,8 +1,9 @@
 # claude-mods
 
-Four small mods for [Claude Code](https://claude.com/claude-code): a task queue so you can keep
+Five small mods for [Claude Code](https://claude.com/claude-code): a task queue so you can keep
 asking while Claude works, a tiny RPG that plays itself while you code, an emoji on every
-session title, and a list of your own messages to jump back to.
+session title, a list of your own messages to jump back to, and a status line of model, effort
+and usage.
 
 | Mod | In one line |
 | --- | --- |
@@ -10,6 +11,7 @@ session title, and a list of your own messages to jump back to.
 | [**Claude RPG**](#claude-rpg) | Clawd adventures, fights and levels up as you work. |
 | [**emoji-title**](#emoji-title) | `fix flaky login test` becomes `🐛 fix flaky login test`. |
 | [**mymsg**](#mymsg) | Lists what you asked this session; jump to any of it in the transcript. |
+| [**statusline**](#statusline) | `[Opus 5.5 H] ctx: 8% 5h: 28% 7d: 17% (79%)` under the prompt. |
 
 ## Contents
 
@@ -21,6 +23,7 @@ session title, and a list of your own messages to jump back to.
   - [Commands](#commands)
 - [emoji-title](#emoji-title)
 - [mymsg](#mymsg)
+- [statusline](#statusline)
 - [For developers](#for-developers)
 
 ## Getting the mods
@@ -32,6 +35,7 @@ At a Claude Code prompt, install the ones you want:
 /plugin install clawd-rpg --marketplace YektaLeblebici/claude-mods
 /plugin install emoji-title --marketplace YektaLeblebici/claude-mods
 /plugin install mymsg --marketplace YektaLeblebici/claude-mods
+/plugin install statusline --marketplace YektaLeblebici/claude-mods
 ```
 
 Answer `y` to add the marketplace, then pick a scope (**user** puts it in every project). Run
@@ -232,6 +236,31 @@ In a long session, finding what you asked an hour ago means scrolling back throu
 - **Needs `python3`** to read the session's transcript for the messages' order; without it,
   messages are placed by their text in the conversation.
 
+## statusline
+
+A status line drawn by the mod itself, on its own row under the prompt, with no script started
+on each refresh:
+
+```
+[Opus 5.5 H] ctx: 8% 5h: 28% 7d: 17% (79%) rst: 2.5h|64.8h
+```
+
+| Part | What it shows |
+| --- | --- |
+| `[Opus 5.5 H]` | The model, `1M` on a 1M-context model, and the effort: `Low`, `M`, `H`, `XH`, `Max`. |
+| `ctx:` | How full the context window is; yellow past 70%, red past 85%. |
+| `5h:` / `7d:` | How much of the 5-hour and 7-day usage limits is used. |
+| `(79%)` | How far through the 7-day window you are; 0% again at each reset. |
+| `rst:` | Hours until the 5-hour and the 7-day windows reset. |
+
+- **Colors are your terminal's own:** labels use its palette, values its theme grey, as a
+  `statusLine` script's text is drawn.
+- **Missing figures show `--`:** usage appears after the session's first response, and only on
+  a Claude subscription.
+- **Effort shows from your first message on,** and after `/effort` from the next one.
+- **Where it sits:** a mod cannot take the `statusLine` row itself, so the line is drawn in the
+  hint area under the prompt. Turn off a `statusLine` script you had, or you will see both.
+
 ## For developers
 
 Each mod is a folder in this repository, listed in `.claude-plugin/marketplace.json`. To work on
@@ -249,6 +278,7 @@ Tests:
 claude plugin test q
 claude plugin test clawd-rpg
 claude plugin test mymsg
+claude plugin test statusline
 cd emoji-title && python3 -I tests/test_emoji_title.py
 cd mymsg && python3 -I tests/test_transcript.py
 ```

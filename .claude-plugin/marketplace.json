@@ -23,6 +23,11 @@
       "name": "mymsg",
       "source": "./mymsg",
       "description": "/mymsg lists your prompts of this session in a pane and jumps to any of them in the transcript"
+    },
+    {
+      "name": "statusline",
+      "source": "./statusline",
+      "description": "A status line under the prompt: model and effort, context use, 5h/7d usage and reset countdowns"
     }
   ],
   "description": "Personal Claude Code plugins"
